@@ -522,6 +522,12 @@ func withCounts(r kv, rec *issueRecord, hyd countsHydration) (*types.IssueWithCo
 	if err != nil {
 		return nil, err
 	}
+	// The SQL list hydration does not select the dependency row id.
+	for i, d := range outs {
+		clone := *d
+		clone.ID = ""
+		outs[i] = &clone
+	}
 	issue.Dependencies = outs
 	iwc := &types.IssueWithCounts{Issue: issue}
 	for _, d := range outs {

@@ -26,7 +26,7 @@ build --extra_execution_platforms=//platforms:rbe_worker
 # ICU policy (engdocs/ICU-POLICY.md): build go-mysql-server with its pure-Go
 # regex backend so no target links libicu. MODULE.bazel carries the matching
 # gazelle_override for github.com/dolthub/go-mysql-server.
-build --@rules_go//go/config:tags=gms_pure_go
+build --@rules_go//go/config:tags=gms_pure_go,pebblegozstd
 
 # Keep the client PATH/env out of action keys.
 build --incompatible_strict_action_env
@@ -228,7 +228,7 @@ test:dolt-race --norun_validations
 # BEADS_TEST_ENV_RUN_DOLT=1 is target env. Remote only in bazel.yml, in a
 # job of its own (bazel-server-storage) that shares bazel-integration's
 # compiles through the remote cache.
-build:doltserver-integration --@rules_go//go/config:tags=gms_pure_go,integration
+build:doltserver-integration --@rules_go//go/config:tags=gms_pure_go,pebblegozstd,integration
 test:doltserver-integration --@rules_go//go/config:race
 test:doltserver-integration --test_tag_filters=dolt-server-integration
 test:doltserver-integration --build_tests_only
@@ -277,7 +277,7 @@ test:doltserver-integration --experimental_remote_cache_eviction_retries=0
 # BAZEL_CMD_DOLT_REQUIRED says otherwise. No BEADS_TEST_SKIP, no -short.
 # Results are cacheable, as in --config=doltserver: every input is in the
 # action key, and a server that cannot start fails the target.
-build:doltserver-cmd --@rules_go//go/config:tags=gms_pure_go,integration
+build:doltserver-cmd --@rules_go//go/config:tags=gms_pure_go,pebblegozstd,integration
 test:doltserver-cmd --@rules_go//go/config:race
 test:doltserver-cmd --test_tag_filters=dolt-server-cmd
 test:doltserver-cmd --build_tests_only
@@ -335,7 +335,7 @@ test:doltserver-cmd --norun_validations
 # stricter for cmd-dolt (no whole-invocation retry on a remote cache
 # eviction) and policy-conformant with sole-run semantics; the eviction
 # allowlist in pr_risk_bazel_coverage_test.go records the new line.
-build:dolt-int --@rules_go//go/config:tags=gms_pure_go,integration
+build:dolt-int --@rules_go//go/config:tags=gms_pure_go,pebblegozstd,integration
 test:dolt-int --@rules_go//go/config:race
 test:dolt-int --test_tag_filters=dolt-server-integration,dolt-server-cmd
 test:dolt-int --build_tests_only
@@ -359,7 +359,7 @@ test:dolt-int --experimental_remote_cache_eviction_retries=0
 # every other configuration, and //internal/testutil/integration (integration
 # files only) compiles to its real contents only here. A per-target `gotags`
 # would not save the compile either: it transitions the whole dep graph.
-build:integration --@rules_go//go/config:tags=gms_pure_go,integration
+build:integration --@rules_go//go/config:tags=gms_pure_go,pebblegozstd,integration
 test:integration --@rules_go//go/config:race
 test:integration --test_env=BEADS_TEST_SKIP=dolt
 # The variants the PR-core lane leaves out stay out, except integration-only

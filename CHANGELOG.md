@@ -24,9 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beside `IssueLifecycle`, and the package runs the conformance package's role contracts
   for all twelve over a test-only responder that answers the contracts' scalar SQL reads
   from the key space; the five dependency-editor cases that assert journal rows or issue
-  versions are not wired and are listed by name. `bd` does not provision the backend
-  yet; it is opened by name through the registry. `TestOpWriteLatency` in the package
-  measures the op-journal write shape.
+  versions are not wired and are listed by name. `bd` links the backend and
+  `bd init --backend=pebble` provisions a workspace on it through a new optional
+  `Create` hook on the backend registry (`backends.Backend.Create`; a registered backend
+  without one is still refused by init). The commit family is answered as a no-op the
+  way the `http` backend answers it, and the `Counter`, `CycleDetector` and `BatchCloser`
+  roles the CLI reaches are served. Pebble's zstd is built on its pure-Go path
+  (`pebblegozstd`, applied in `.bazelrc`, a gazelle override and the Makefile tags)
+  because its cgo path bundles the libzstd symbols Dolt's gozstd already bundles.
+  `TestOpWriteLatency` in the package measures the op-journal write shape.
 
 ### Security
 

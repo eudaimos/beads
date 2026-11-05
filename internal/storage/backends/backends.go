@@ -180,6 +180,11 @@ type Backend struct {
 	// one of the wrong shape — would look like the credential was honored
 	// when it was not.
 	OpenWith func(ctx context.Context, beadsDir string, opts OpenOptions) (storage.DoltStorage, error)
+
+	// Create provisions an empty workspace store under beadsDir for bd init.
+	// A backend that leaves it nil can only open workspaces something else
+	// created, and bd init refuses it by name.
+	Create func(ctx context.Context, beadsDir string) error
 }
 
 // OpenWithOptions opens beadsDir through this backend, honoring opts. It
@@ -266,6 +271,30 @@ func Registered(name string) bool {
 // remote store — with no separately discoverable local database. It is the
 // single authority for that classification so CLI and library discovery route
 // such workspaces to the .beads directory instead of returning "no database".
+// CanCreate reports whether the named backend can provision a workspace for
+// bd init.
+func CanCreate(name string) bool {
+	mu.RLock()
+	defer mu.RUnlock()
+	backend, ok := registry[name]
+	return ok && backend.Create != nil
+}
+
+// Create provisions an empty workspace store under beadsDir on the named
+// backend.
+func Create(ctx context.Context, name, beadsDir string) error {
+	mu.RLock()
+	backend, ok := registry[name]
+	mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("backends: %q is not registered", name)
+	}
+	if backend.Create == nil {
+		return fmt.Errorf("backends: %q cannot create a workspace; it can only open an existing one", name)
+	}
+	return backend.Create(ctx, beadsDir)
+}
+
 func WorkspaceIsBeadsDir(name string) bool {
 	mu.RLock()
 	defer mu.RUnlock()

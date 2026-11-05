@@ -243,6 +243,19 @@ go_deps.gazelle_override(
     path = "github.com/dolthub/go-mysql-server",
 )
 
+# Pebble's zstd has a cgo path (DataDog/zstd, which bundles libzstd) and a
+# pure-Go path behind the pebblegozstd tag. bd already links Dolt's own bundled
+# libzstd (dolthub/gozstd), so the cgo path duplicates every zstd symbol at
+# link time: gazelle must see pebblegozstd as satisfied so it selects
+# zstd_nocgo.go and drops the DataDog/zstd edge entirely.
+go_deps.gazelle_override(
+    directives = [
+        "gazelle:build_tags pebblegozstd",
+        "gazelle:exclude internal/compression/zstd_cgo.go",
+    ],
+    path = "github.com/cockroachdb/pebble/v2",
+)
+
 # protoc-gen-validate ships validate/validate.pb.go, so its Go library can
 # compile from the checked-in code. Its own validate/BUILD instead makes the
 # Go library a go_proto_library, so every lane built protoc from source just

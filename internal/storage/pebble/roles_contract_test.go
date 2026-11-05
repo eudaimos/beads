@@ -539,3 +539,63 @@ func TestClaimerContract(t *testing.T) {
 		})
 	}
 }
+
+func TestBatchCloserContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.BatchCloserFixture)
+	}{
+		{"OutcomesMirrorItemsIndexForIndex", conformance.RunBatchCloserOutcomesMirrorItemsIndexForIndex},
+		{"PerItemRefusalIsAResultAndSurvivorsCommit", conformance.RunBatchCloserPerItemRefusalIsAResultAndSurvivorsCommit},
+		{"OutcomeSnapshotIsTheDocumentedShape", conformance.RunBatchCloserOutcomeSnapshotIsTheDocumentedShape},
+		{"RequestValidationReturnsZeroResultAndChangesNothing", conformance.RunBatchCloserRequestValidationReturnsZeroResultAndChangesNothing},
+		{"ClaimFilterValueFailureIsARequestValidationFailure", conformance.RunBatchCloserClaimFilterValueFailureIsARequestValidationFailure},
+		{"BackendFailureReturnsNoOutcomes", conformance.RunBatchCloserBackendFailureReturnsNoOutcomes},
+		{"IdempotentRecloseIsAPerItemSuccess", conformance.RunBatchCloserIdempotentRecloseIsAPerItemSuccess},
+		{"AllIdempotentBatchLandsNothing", conformance.RunBatchCloserAllIdempotentBatchLandsNothing},
+		{"DuplicateItemRecloseAtItsOwnIndex", conformance.RunBatchCloserDuplicateItemRecloseAtItsOwnIndex},
+		{"WispItemClosesAndEarnsTheClaim", conformance.RunBatchCloserWispItemClosesAndEarnsTheClaim},
+		{"DurableHistoryNeverNamesAWisp", conformance.RunBatchCloserDurableHistoryNeverNamesAWisp},
+		{"ForceBypassesOnlyClosePolicy", conformance.RunBatchCloserForceBypassesOnlyClosePolicy},
+		{"ClaimNextHydratesWhenSomethingClosed", conformance.RunBatchCloserClaimNextHydratesWhenSomethingClosed},
+		{"ClaimNextIsNilWhenNothingClosed", conformance.RunBatchCloserClaimNextIsNilWhenNothingClosed},
+		{"ClaimNextIsNilWhenTheFrontIsEmpty", conformance.RunBatchCloserClaimNextIsNilWhenTheFrontIsEmpty},
+		{"ClaimNextSeesAnUnblockingFromItsOwnBatch", conformance.RunBatchCloserClaimNextSeesAnUnblockingFromItsOwnBatch},
+		{"RecordsOneHistoryEntryForWhatLanded", conformance.RunBatchCloserRecordsOneHistoryEntryForWhatLanded},
+		{"AllRefusedBatchRecordsNoHistory", conformance.RunBatchCloserAllRefusedBatchRecordsNoHistory},
+		{"DoesNotMutateTheCallerRequest", conformance.RunBatchCloserDoesNotMutateTheCallerRequest},
+		{"SettlesTheDependersOfWhatItClosed", conformance.RunBatchCloserSettlesTheDependersOfWhatItClosed},
+		{"ItemsAnswerToTheCloseGuards", conformance.RunBatchCloserItemsAnswerToTheCloseGuards},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newBatchCloserFixture(t, "bcl")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}
+
+func TestCycleDetectorContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.CycleDetectorFixture)
+	}{
+		{"ReportsNoCycleForAnAcyclicSubgraph", conformance.RunCycleDetectorReportsNoCycleForAnAcyclicSubgraph},
+		{"FindsADurableCycleRotatedToItsLowestID", conformance.RunCycleDetectorFindsADurableCycleRotatedToItsLowestID},
+		{"ReportsTheSameCyclesEveryRun", conformance.RunCycleDetectorReportsTheSameCyclesEveryRun},
+		{"MergesTheDurableAndEphemeralPlanes", conformance.RunCycleDetectorMergesTheDurableAndEphemeralPlanes},
+		{"FollowsOnlyBlockingEdges", conformance.RunCycleDetectorFollowsOnlyBlockingEdges},
+		{"IncludeTracksIgnoresAPureTracksLoop", conformance.RunCycleDetectorIncludeTracksIgnoresAPureTracksLoop},
+		{"IncludeTracksFindsTheMoleculeRootShape", conformance.RunCycleDetectorIncludeTracksFindsTheMoleculeRootShape},
+		{"IncludeTracksWalksEachEdgeInItsStoredDirection", conformance.RunCycleDetectorIncludeTracksWalksEachEdgeInItsStoredDirection},
+		{"ReportsAnHonestPartial", conformance.RunCycleDetectorReportsAnHonestPartial},
+		{"CountsAWhollyUndescribableCycle", conformance.RunCycleDetectorCountsAWhollyUndescribableCycle},
+		{"WritesNothing", conformance.RunCycleDetectorWritesNothing},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newCycleDetectorFixture(t, "cyc")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}

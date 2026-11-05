@@ -446,6 +446,13 @@ func (l *lifecycle) Close(ctx context.Context, request publicops.CloseRequest) (
 			return err
 		}
 		result.Issue, result.Changed, result.OpenChildren = hydrated, !unchanged, openChildren
+		if request.AutoCloseMolecule {
+			autos, err := t.closeCompletedMolecules([]string{request.IssueID}, request.Actor, request.Session)
+			if err != nil {
+				return err
+			}
+			result.AutoClosedMolecule, result.MoleculeAutoCloseRefusal = autos[0].Root, autos[0].Refusal
+		}
 		return nil
 	})
 	return result, err

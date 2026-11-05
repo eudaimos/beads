@@ -115,7 +115,7 @@ endif
 # dependency, making release binaries portable across Linux distros.
 # ICU flags are only needed for scripts/test-icu-path.sh (which exercises the
 # opt-in ICU regex path).
-BUILD_TAGS := gms_pure_go
+BUILD_TAGS := gms_pure_go,pebblegozstd
 REGRESSION_TIMEOUT ?= 20m
 
 # Build the bd binary

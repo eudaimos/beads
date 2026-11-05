@@ -66,8 +66,12 @@ func decodeRecord(data []byte) (*issueRecord, error) {
 }
 
 // toIssue returns a detached copy of the row for a caller.
+// toIssue is the row as the SQL backends hydrate it: the issue select list
+// there never projects is_blocked onto the issue, so the flag is not carried
+// either; IsBlocked and IsBlockedBatch answer it, and the record keeps it.
 func (r *issueRecord) toIssue() *types.Issue {
 	i := r.Issue
+	i.IsBlocked = false
 	i.ContentHash = r.ContentHash
 	i.RowVersion = r.RowVersion
 	i.SourceRepo = r.SourceRepo

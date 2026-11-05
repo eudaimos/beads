@@ -19,7 +19,10 @@
 // store resolves its work through: Lifecycle (the guarded path its op journal
 // writes through and the one the latency measurement drives), IssueReader,
 // WorkspaceConfig, StatsReporter, EdgeReader, IssueRelations, IssueClaimer,
-// Releaser, MetadataCAS, Deleter, DependencyEditor and BatchApplier. Those
+// Releaser, MetadataCAS, Deleter, DependencyEditor and BatchApplier, plus the
+// Counter, CycleDetector and BatchCloser roles bd's own verbs reach, and the
+// commit family as a no-op (vc.go) so bd's auto-commit after each verb has
+// nothing to refuse. The served roles
 // run the conformance package's role contracts (roles_contract_test.go); the
 // contracts' scalar SQL reads are answered by a test-only responder that
 // projects the key space into the tables they name (rolekit_test.go).

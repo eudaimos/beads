@@ -3,7 +3,6 @@ package pebble
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"path"
 	"regexp"
@@ -158,45 +157,22 @@ func (s *Store) ClaimIssue(ctx context.Context, id string, actor string) error {
 // transaction that computes readiness, skipping rows a racing claim took. It
 // returns nil when nothing matching is claimable.
 func (s *Store) ClaimReadyIssue(ctx context.Context, filter types.WorkFilter, actor string) (*types.Issue, error) {
-	claimFilter := filter
-	claimFilter.Status = types.StatusOpen
-	claimFilter.Statuses = nil
-	claimFilter.Unassigned = true
-	claimFilter.Assignee = nil
-	claimFilter.Limit = 0
-	claimFilter.Offset = 0
-	claimFilter.MaxRows = 0
-	claimFilter.MaxRowsSource = ""
 	var claimed *types.Issue
 	err := s.run(ctx, func(t *txn) error {
-		candidates, err := claimCandidates(t.kv, claimFilter)
-		if err != nil {
+		rec, err := t.claimNext(filter, actor)
+		if err != nil || rec == nil {
 			return err
 		}
-		for _, rec := range candidates {
-			if err := t.claimIssue(rec.Issue.ID, actor); err != nil {
-				if errors.Is(err, storage.ErrAlreadyClaimed) || errors.Is(err, storage.ErrNotClaimable) {
-					continue
-				}
-				return err
-			}
-			got, err := loadIssue(t.kv, rec.Issue.ID)
-			if err != nil {
-				return fmt.Errorf("get claimed issue: %w", err)
-			}
-			claimed = got
-			return t.settleBlocked()
+		got, err := loadIssue(t.kv, rec.Issue.ID)
+		if err != nil {
+			return fmt.Errorf("get claimed issue: %w", err)
 		}
+		claimed = got
 		return nil
 	})
 	return claimed, err
 }
 
-// claimCandidates is a minimal ready-work scan for the claim path: the rows
-// sqlbuild.BuildReadyWorkWhere admits, in (priority, created_at, id) order.
-// It applies the status, pinned, blocked, ephemeral, priority, type,
-// assignee, defer, excluded-id, label, parent, molecule and metadata
-// predicates; the ready reader proper lives in ready.go.
 func claimCandidates(r kv, filter types.WorkFilter) ([]*issueRecord, error) {
 	excludedTypes := map[types.IssueType]bool{}
 	if filter.Type == "" {

@@ -44,6 +44,7 @@ import (
 	"github.com/steveyegge/beads/internal/storage/dolt"
 	dbidentifier "github.com/steveyegge/beads/internal/storage/domain/db"
 	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
+	_ "github.com/steveyegge/beads/internal/storage/pebble" // registers the pebble backend
 	"github.com/steveyegge/beads/internal/storage/schema"
 	"github.com/steveyegge/beads/internal/storage/uow"
 	"github.com/steveyegge/beads/internal/telemetry"

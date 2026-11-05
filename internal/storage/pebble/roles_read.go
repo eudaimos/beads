@@ -43,6 +43,20 @@ type edgeReader struct{ s *Store }
 var _ publicops.EdgeReader = (*edgeReader)(nil)
 
 func (e *edgeReader) ReadEdges(ctx context.Context, request publicops.EdgeReadRequest) (publicops.EdgeReadResult, error) {
+	var result publicops.EdgeReadResult
+	err := e.s.read(func(r kv) error {
+		var err error
+		result, err = readEdges(r, request)
+		return err
+	})
+	if err != nil {
+		return publicops.EdgeReadResult{}, err
+	}
+	return result, nil
+}
+
+// readEdges is the edge reader's body over one read view.
+func readEdges(r kv, request publicops.EdgeReadRequest) (publicops.EdgeReadResult, error) {
 	if err := storageissueops.ValidateEdgeReadRequest(request); err != nil {
 		return publicops.EdgeReadResult{}, err
 	}
@@ -52,32 +66,26 @@ func (e *edgeReader) ReadEdges(ctx context.Context, request publicops.EdgeReadRe
 	}
 	present := make(map[string]struct{}, len(anchors))
 	edges := make(map[string][]*types.Dependency, len(anchors))
-	err := e.s.read(func(r kv) error {
-		for _, id := range anchors {
-			ok, err := recordExists(r, id)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				continue
-			}
-			present[id] = struct{}{}
-			deps, err := dependencyRecords(r, id)
-			if err != nil {
-				return err
-			}
-			// The source-keyed read does not select the row id.
-			for i, dep := range deps {
-				clone := *dep
-				clone.ID = ""
-				deps[i] = &clone
-			}
-			edges[id] = deps
+	for _, id := range anchors {
+		ok, err := recordExists(r, id)
+		if err != nil {
+			return publicops.EdgeReadResult{}, err
 		}
-		return nil
-	})
-	if err != nil {
-		return publicops.EdgeReadResult{}, err
+		if !ok {
+			continue
+		}
+		present[id] = struct{}{}
+		deps, err := dependencyRecords(r, id)
+		if err != nil {
+			return publicops.EdgeReadResult{}, err
+		}
+		// The source-keyed read does not select the row id.
+		for i, dep := range deps {
+			clone := *dep
+			clone.ID = ""
+			deps[i] = &clone
+		}
+		edges[id] = deps
 	}
 	return storageissueops.FinishEdgeRead(anchors, present, edges, request.Types), nil
 }
@@ -92,23 +100,72 @@ type issueRelations struct{ s *Store }
 var _ publicops.Relations = (*issueRelations)(nil)
 
 func (x *issueRelations) Related(ctx context.Context, request publicops.RelatedRequest) ([]*publicops.RelatedIssue, error) {
-	if err := storageissueops.ValidateRelatedRequest(request); err != nil {
-		return nil, err
-	}
-	var items []*types.IssueWithDependencyMetadata
+	var items []*publicops.RelatedIssue
 	err := x.s.read(func(r kv) error {
-		ok, err := recordExists(r, request.ID)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("%w: issue %s", storage.ErrNotFound, request.ID)
-		}
-		items, err = anchorIssuesWithMetadata(r, request.ID, request.Direction == publicops.RelationIn)
+		var err error
+		items, err = related(r, request)
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
+	return items, nil
+}
+
+// related is the relations role's body over one read view.
+func related(r kv, request publicops.RelatedRequest) ([]*publicops.RelatedIssue, error) {
+	if err := storageissueops.ValidateRelatedRequest(request); err != nil {
+		return nil, err
+	}
+	ok, err := recordExists(r, request.ID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("%w: issue %s", storage.ErrNotFound, request.ID)
+	}
+	items, err := anchorIssuesWithMetadata(r, request.ID, request.Direction == publicops.RelationIn)
+	if err != nil {
+		return nil, err
+	}
 	return storageissueops.FinishRelatedPage(items, request.Types), nil
+}
+
+// getMany is the batch get the molecule helpers read through.
+func getMany(r kv, request publicops.GetManyRequest) (publicops.GetManyResult, error) {
+	if err := storageissueops.ValidateGetManyRequest(request); err != nil {
+		return publicops.GetManyResult{}, err
+	}
+	ids := storageissueops.DedupeGetManyIDs(request.IDs)
+	if len(ids) == 0 {
+		return publicops.GetManyResult{Issues: []*publicops.Issue{}, Missing: []string{}}, nil
+	}
+	found := make(map[string]*publicops.Issue, len(ids))
+	for _, id := range ids {
+		issue, err := loadIssue(r, id)
+		if err != nil {
+			if isNotFound(err) {
+				continue
+			}
+			return publicops.GetManyResult{}, fmt.Errorf("get many: %w", err)
+		}
+		found[id] = issue
+	}
+	return storageissueops.FinishGetMany(ids, found), nil
+}
+
+// kvMoleculeReader serves the three reads the molecule helpers in the public
+// issueops package need, over one read view.
+type kvMoleculeReader struct{ r kv }
+
+func (m kvMoleculeReader) GetMany(_ context.Context, request publicops.GetManyRequest) (publicops.GetManyResult, error) {
+	return getMany(m.r, request)
+}
+
+func (m kvMoleculeReader) Related(_ context.Context, request publicops.RelatedRequest) ([]*publicops.RelatedIssue, error) {
+	return related(m.r, request)
+}
+
+func (m kvMoleculeReader) ReadEdges(_ context.Context, request publicops.EdgeReadRequest) (publicops.EdgeReadResult, error) {
+	return readEdges(m.r, request)
 }

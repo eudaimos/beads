@@ -25,11 +25,25 @@ func init() {
 	backends.Register(BackendName, backends.Backend{
 		Open:         openBackend,
 		OpenReadOnly: openBackend,
+		Create:       createBackend,
+		// The store lives under the .beads directory itself; there is no
+		// database file for workspace discovery to look for.
+		WorkspaceIsBeadsDir: true,
 	})
 }
 
 func openBackend(ctx context.Context, beadsDir string) (storage.DoltStorage, error) {
 	return Open(ctx, filepath.Join(beadsDir, DataDirName))
+}
+
+// createBackend provisions the store directory for bd init: an open creates
+// it, and closing leaves an empty store behind.
+func createBackend(ctx context.Context, beadsDir string) error {
+	s, err := Open(ctx, filepath.Join(beadsDir, DataDirName))
+	if err != nil {
+		return err
+	}
+	return s.Close()
 }
 
 // Store is the Pebble-backed storage.DoltStorage. See the package doc.
