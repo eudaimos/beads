@@ -18,13 +18,22 @@ import (
 // the Lifecycle role, then closed through a fenced update) on an on-disk
 // store with fsync, plus an edge add/remove and a ready read against a
 // pre-populated graph. BEADS_PEBBLE_LATENCY_ROWS sizes the backdrop (default
-// 2000; the assessment's target is 40000 rows / 20000 edges) and
-// BEADS_PEBBLE_LATENCY_OPS the number of measured ops (default 200).
+// 2000; the assessment's target is 40000 rows / 20000 edges),
+// BEADS_PEBBLE_LATENCY_OPS the number of measured ops (default 200), and
+// BEADS_PEBBLE_LATENCY_MEM=1 swaps the on-disk store for the in-memory one
+// to show the engine cost without the WAL fsync.
 func TestOpWriteLatency(t *testing.T) {
 	rows := envInt("BEADS_PEBBLE_LATENCY_ROWS", 2000)
 	ops := envInt("BEADS_PEBBLE_LATENCY_OPS", 200)
 	ctx := context.Background()
-	s, err := Open(ctx, t.TempDir())
+	var s *Store
+	var err error
+	if os.Getenv("BEADS_PEBBLE_LATENCY_MEM") != "" {
+		// In memory: no WAL fsync, so the numbers are the engine's own cost.
+		s, err = OpenInMemory(ctx)
+	} else {
+		s, err = Open(ctx, t.TempDir())
+	}
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -106,7 +115,7 @@ func TestOpWriteLatency(t *testing.T) {
 		}
 		readyD = append(readyD, time.Since(start))
 	}
-	t.Logf("backdrop: %d rows, %d edges; %d ops", rows, rows/2, ops)
+	t.Logf("backdrop: %d rows, %d edges; %d ops; in-memory=%v", rows, rows/2, ops, os.Getenv("BEADS_PEBBLE_LATENCY_MEM") != "")
 	for _, m := range []struct {
 		name string
 		d    []time.Duration

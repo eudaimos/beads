@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An experimental `pebble` storage backend (Phase 0 spike).** `internal/storage/pebble`
+  registers a pure-Go key-value backend on CockroachDB's Pebble behind the backend seam:
+  single-writer transactions over an indexed batch, the blocked-state rule computed in
+  process over the affected neighborhood, and the Lifecycle role. It passes the portable
+  conformance suite (`backend/conformance.RunAll`) and declares version control, history,
+  remotes, sync, federation, compaction and the other roles unsupported through the
+  generated shell. `bd` does not provision it yet; it is opened by name through the
+  registry. `TestOpWriteLatency` in the package measures the op-journal write shape.
+
 ### Security
 
 - **A `GT_ROOT` from a committed `.beads/.env` can no longer make bd write or
