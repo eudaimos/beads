@@ -18,8 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generated shell. Ready work, its counts and the blocked list read derived indexes
   (a ready-candidate key in sort order, a blocked set, a defer set) that the record
   writer maintains and that are rebuilt on open, so a ready page is bounded by the page
-  rather than the store. `bd` does not provision it yet; it is opened by name through
-  the registry. `TestOpWriteLatency` in the package measures the op-journal write shape.
+  rather than the store. The issueops roles gascity's native store calls (`IssueReader`,
+  `WorkspaceConfig`, `StatsReporter`, `EdgeReader`, `IssueRelations`, `IssueClaimer`,
+  `Releaser`, `MetadataCAS`, `Deleter`, `DependencyEditor`, `BatchApplier`) are served
+  beside `IssueLifecycle`, and the package runs the conformance package's role contracts
+  for all twelve over a test-only responder that answers the contracts' scalar SQL reads
+  from the key space; the five dependency-editor cases that assert journal rows or issue
+  versions are not wired and are listed by name. `bd` does not provision the backend
+  yet; it is opened by name through the registry. `TestOpWriteLatency` in the package
+  measures the op-journal write shape.
 
 ### Security
 

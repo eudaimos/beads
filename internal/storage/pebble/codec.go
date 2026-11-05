@@ -36,12 +36,17 @@ type issueRecord struct {
 	// sqlbuild.OwnReadyAffectingEdgeSQL). putRecord derives it, and the
 	// ready-candidate index is keyed on it.
 	EffectiveBlocked bool `json:"eff_blocked,omitempty"`
+	// WaitersEmpty records a waiters list that was set to the empty list, which
+	// the issue's own encoding cannot tell from an unset one; the SQL column
+	// holds "[]" for the former and NULL for the latter.
+	WaitersEmpty bool `json:"waiters_empty,omitempty"`
 }
 
 func encodeRecord(r *issueRecord) ([]byte, error) {
 	clone := *r
 	clone.Issue.Dependencies = nil
 	clone.Issue.Comments = nil
+	clone.WaitersEmpty = clone.Issue.Waiters != nil && len(clone.Issue.Waiters) == 0
 	return json.Marshal(&clone)
 }
 
@@ -54,6 +59,9 @@ func decodeRecord(data []byte) (*issueRecord, error) {
 	r.Issue.RowVersion = r.RowVersion
 	r.Issue.SourceRepo = r.SourceRepo
 	r.Issue.IDPrefix = r.IDPrefix
+	if r.WaitersEmpty && r.Issue.Waiters == nil {
+		r.Issue.Waiters = []string{}
+	}
 	return &r, nil
 }
 

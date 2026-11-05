@@ -17,7 +17,11 @@ func unsupportedAllowlist(t *testing.T) map[string]string {
 	shell := reflect.TypeOf(unsupportedDoltStorage{})
 	out := map[string]string{}
 	for i := 0; i < shell.NumMethod(); i++ {
-		out[shell.Method(i).Name] = "not implemented by the Phase 0 spike"
+		name := shell.Method(i).Name
+		if servedRoles[name] {
+			continue
+		}
+		out[name] = "not implemented by the Phase 0 spike"
 	}
 	if len(out) == 0 {
 		t.Fatal("no generated stubs found; regenerate unsupported_gen.go")

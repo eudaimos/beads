@@ -690,6 +690,9 @@ func blockedIssues(r kv, filter types.WorkFilter) ([]*types.BlockedIssue, error)
 // not ephemeral unless asked, and not of an infrastructure type, ordered by
 // filter.SortPolicy.
 func (s *Store) GetReadyWork(ctx context.Context, filter types.WorkFilter) ([]*types.Issue, error) {
+	if err := ctxErr(ctx); err != nil {
+		return nil, err
+	}
 	var out []*types.Issue
 	err := s.read(func(r kv) error {
 		v, err := readyWork(r, filter)
@@ -702,6 +705,9 @@ func (s *Store) GetReadyWork(ctx context.Context, filter types.WorkFilter) ([]*t
 // GetReadyWorkWithCounts is GetReadyWork hydrated with dependency,
 // dependent and comment counts and the parent-child parent.
 func (s *Store) GetReadyWorkWithCounts(ctx context.Context, filter types.WorkFilter) ([]*types.IssueWithCounts, error) {
+	if err := ctxErr(ctx); err != nil {
+		return nil, err
+	}
 	items, _, err := s.GetReadyWorkWithCountsAndTotal(ctx, filter)
 	return items, err
 }

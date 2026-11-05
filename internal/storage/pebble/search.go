@@ -231,11 +231,11 @@ func metadataMatches(raw json.RawMessage, hasKey string, keys []string, fields m
 // timeAfter / timeBefore compare a nullable column with a bound: a NULL
 // column never satisfies the comparison.
 func timeAfter(col *time.Time, bound *time.Time) bool {
-	return col != nil && col.After(*bound)
+	return col != nil && col.After(bound.Truncate(time.Second))
 }
 
 func timeBefore(col *time.Time, bound *time.Time) bool {
-	return col != nil && col.Before(*bound)
+	return col != nil && col.Before(bound.Truncate(time.Second))
 }
 
 func containsStatus(set []types.Status, s types.Status) bool {
@@ -704,6 +704,9 @@ func searchIssuesWithCounts(r kv, query string, filter types.IssueFilter) ([]*ty
 // merged, ordered by filter.SortBy/SortDesc (priority ASC, created_at DESC,
 // id ASC by default) and bounded by Limit and the MaxRows cap.
 func (s *Store) SearchIssues(ctx context.Context, query string, filter types.IssueFilter) ([]*types.Issue, error) {
+	if err := ctxErr(ctx); err != nil {
+		return nil, err
+	}
 	var out []*types.Issue
 	err := s.read(func(r kv) error {
 		v, err := searchIssues(r, query, filter)
@@ -716,6 +719,9 @@ func (s *Store) SearchIssues(ctx context.Context, query string, filter types.Iss
 // SearchIssueIDs is the narrow projection of SearchIssues: the matching ids
 // in the same order.
 func (s *Store) SearchIssueIDs(ctx context.Context, query string, filter types.IssueFilter) ([]string, error) {
+	if err := ctxErr(ctx); err != nil {
+		return nil, err
+	}
 	var out []string
 	err := s.read(func(r kv) error {
 		v, err := searchIssueIDs(r, query, filter)
@@ -740,6 +746,9 @@ func (s *Store) SearchIssueSummaries(ctx context.Context, query string, filter t
 // mega-query computes: outgoing blocks edges, incoming blocks edges,
 // comments, the parent-child parent, and the dependency records.
 func (s *Store) SearchIssuesWithCounts(ctx context.Context, query string, filter types.IssueFilter) ([]*types.IssueWithCounts, error) {
+	if err := ctxErr(ctx); err != nil {
+		return nil, err
+	}
 	var out []*types.IssueWithCounts
 	err := s.read(func(r kv) error {
 		v, err := searchIssuesWithCounts(r, query, filter)

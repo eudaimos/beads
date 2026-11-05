@@ -12,6 +12,7 @@ import (
 	"github.com/steveyegge/beads/internal/storage"
 	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/types"
+	publicops "github.com/steveyegge/beads/issueops"
 )
 
 // --- create -----------------------------------------------------------------------
@@ -338,6 +339,9 @@ func loadIssue(r kv, id string) (*types.Issue, error) {
 }
 
 func (s *Store) GetIssue(ctx context.Context, id string) (*types.Issue, error) {
+	if err := ctxErr(ctx); err != nil {
+		return nil, err
+	}
 	var out *types.Issue
 	err := s.read(func(r kv) error {
 		v, err := loadIssue(r, id)
@@ -348,6 +352,9 @@ func (s *Store) GetIssue(ctx context.Context, id string) (*types.Issue, error) {
 }
 
 func (s *Store) GetIssuesByIDs(ctx context.Context, ids []string) ([]*types.Issue, error) {
+	if err := ctxErr(ctx); err != nil {
+		return nil, err
+	}
 	var out []*types.Issue
 	err := s.read(func(r kv) error {
 		seen := map[string]bool{}
@@ -431,15 +438,9 @@ func (t *txn) updateIssue(id string, updates map[string]interface{}, actor strin
 	if raw, ok := updates["status"]; ok && !forceClosePolicy {
 		if cat, err := statusCategory(t.kv, types.Status(statusString(raw))); err != nil {
 			return false, err
-		} else if cat == types.CategoryDone && open(oldIssue.Status) && closePolicyRefusesOpenChildren(t.kv) {
-			children, err := childrenOf(t.kv, id)
-			if err != nil {
+		} else if cat == types.CategoryDone && open(oldIssue.Status) {
+			if _, err := enforceClosePolicy(t.kv, id, false, false); err != nil {
 				return false, err
-			}
-			for _, c := range children {
-				if child, err := getRecord(t.kv, c); err == nil && open(child.Issue.Status) {
-					return false, fmt.Errorf("%w: %s has open children", storage.ErrCloseOpenChildren, id)
-				}
 			}
 		}
 	}
@@ -683,6 +684,10 @@ func applyUpdateField(issue *types.Issue, key string, value interface{}) error {
 			issue.EstimatedMinutes = nil
 			return nil
 		}
+		if p, isPtr := value.(*int); isPtr && p == nil {
+			issue.EstimatedMinutes = nil
+			return nil
+		}
 		n, ok := asInt(value)
 		if !ok {
 			return bad()
@@ -763,7 +768,7 @@ func applyUpdateField(issue *types.Issue, key string, value interface{}) error {
 	case "waiters":
 		switch w := value.(type) {
 		case []string:
-			issue.Waiters = append([]string(nil), w...)
+			issue.Waiters = append([]string{}, w...)
 		case nil:
 			issue.Waiters = nil
 		case string:
@@ -969,20 +974,60 @@ func (s *Store) ReopenIssue(ctx context.Context, id string, reason string, actor
 
 // --- unclaim ---------------------------------------------------------------------
 
+// unclaim releases a claim the way the SQL path does: a closed row refuses,
+// an unassigned row refuses, a foreign holder refuses unless forced (or
+// unless the caller named that holder and it matches), and the release
+// clears the assignee, the started_at stamp and the lease, then records an
+// "unclaimed" event carrying the row before and the fields it reset.
 func (t *txn) unclaim(id, actor string, expectedAssignee *string, force bool) error {
+	if expectedAssignee != nil && *expectedAssignee == "" {
+		return fmt.Errorf("conditional unclaim of %s: expected assignee must not be empty (use UnclaimIssue for an unconditional release)", id)
+	}
 	rec, err := getRecord(t.kv, id)
 	if err != nil {
+		return fmt.Errorf("failed to get issue for unclaim: %w", err)
+	}
+	oldIssue := rec.toIssue()
+	if oldIssue.Status == types.StatusClosed {
+		return fmt.Errorf("cannot unclaim closed issue %s", id)
+	}
+	if expectedAssignee != nil {
+		if !storageissueops.ActorMatches(oldIssue.Assignee, *expectedAssignee) {
+			return fmt.Errorf("%w: %s is held by %q, expected %q", storage.ErrAssigneeMismatch, id, oldIssue.Assignee, *expectedAssignee)
+		}
+	} else {
+		if oldIssue.Assignee == "" {
+			return fmt.Errorf("issue %s is not assigned", id)
+		}
+		if !force && !storageissueops.ActorMatches(oldIssue.Assignee, actor) {
+			return fmt.Errorf("%w: %s is held by %s; coordinate with the holder — pass --force only if their claim is abandoned (crashed agent, expired lease)",
+				publicops.ErrNotOwner, id, oldIssue.Assignee)
+		}
+	}
+	if oldIssue.Status != types.StatusOpen && oldIssue.Status != types.StatusInProgress {
+		return fmt.Errorf("failed to unclaim issue %s: no matching row", id)
+	}
+	old := *rec
+	now := nowUTC()
+	rec.Issue.Assignee = ""
+	rec.Issue.Status = types.StatusOpen
+	rec.Issue.StartedAt = nil
+	rec.Issue.UpdatedAt = now
+	rec.ContentHash = rec.Issue.ComputeContentHash()
+	rec.RowVersion++
+	if err := putRecord(t.kv, &old, rec); err != nil {
+		return fmt.Errorf("failed to unclaim issue: %w", err)
+	}
+	if err := t.kv.del(leaseKey(id)); err != nil {
 		return err
 	}
-	if expectedAssignee != nil && rec.Issue.Assignee != *expectedAssignee {
-		return fmt.Errorf("%w: issue %s is assigned to %q, expected %q", storage.ErrAssigneeMismatch, id, rec.Issue.Assignee, *expectedAssignee)
+	oldData, _ := json.Marshal(oldIssue)
+	newData, _ := json.Marshal(map[string]interface{}{"assignee": "", "status": "open"})
+	if err := t.recordEvent(rec, types.EventType("unclaimed"), actor, strPtr(string(oldData)), strPtr(string(newData)), nil); err != nil {
+		return fmt.Errorf("failed to record unclaim event: %w", err)
 	}
-	if !force && rec.Issue.Assignee != "" && rec.Issue.Assignee != actor && expectedAssignee == nil {
-		return fmt.Errorf("%w: issue %s is assigned to %q", storage.ErrAssigneeMismatch, id, rec.Issue.Assignee)
-	}
-	updates := map[string]interface{}{"assignee": "", "status": string(types.StatusOpen)}
-	_, err = t.updateIssue(id, updates, actor, storage.UpdateIssueOptions{})
-	return err
+	t.markBlockedDirty(id)
+	return nil
 }
 
 func (s *Store) UnclaimIssue(ctx context.Context, id string, actor string, force bool) error {

@@ -3,6 +3,7 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 go_library(
     name = "pebble",
     srcs = [
+        "batch_apply.go",
         "blocked.go",
         "bulk.go",
         "claims.go",
@@ -23,6 +24,8 @@ go_library(
         "readyindex.go",
         "records.go",
         "roles.go",
+        "roles_read.go",
+        "roles_write.go",
         "search.go",
         "slots.go",
         "sortutil.go",
@@ -45,6 +48,10 @@ go_library(
         "//internal/storage/rowid",
         "//internal/storage/sqlbuild",
         "//internal/types",
+        "//internal/workapi",
+        "//internal/workapi/storereader",
+        "//internal/workapi/storestats",
+        "//internal/workapi/storeworkspaceconfig",
         "//issueops",
         "//memoryops",
         "@com_github_cockroachdb_pebble_v2//:pebble",
@@ -58,6 +65,9 @@ go_test(
         "conformance_test.go",
         "latency_test.go",
         "readyindex_test.go",
+        "rolefixtures_test.go",
+        "rolekit_test.go",
+        "roles_contract_test.go",
     ],
     embed = [":pebble"],
     deps = [

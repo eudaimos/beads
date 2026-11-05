@@ -15,14 +15,18 @@
 // RunAll): issue CRUD, search, counts, dependencies and readiness, blocked
 // state, labels, comments, events, config and metadata, slots, statistics,
 // stale issues, iterators, transactions, claim/lease/heartbeat/reclaim,
-// promote and rekey, batch create, plus the Lifecycle role, which is the
-// guarded path Gas City's op journal writes through and the one the latency
-// measurement drives. Everything else — version control, history, remotes,
-// sync, federation, compaction, the other issueops roles — answers
+// promote and rekey, batch create, plus the issueops roles Gas City's native
+// store resolves its work through: Lifecycle (the guarded path its op journal
+// writes through and the one the latency measurement drives), IssueReader,
+// WorkspaceConfig, StatsReporter, EdgeReader, IssueRelations, IssueClaimer,
+// Releaser, MetadataCAS, Deleter, DependencyEditor and BatchApplier. Those
+// run the conformance package's role contracts (roles_contract_test.go); the
+// contracts' scalar SQL reads are answered by a test-only responder that
+// projects the key space into the tables they name (rolekit_test.go).
+// Everything else — version control, history, remotes, sync, federation,
+// compaction, the events journal, the roles only bd calls — answers
 // *storage.ErrUnsupported through the generated shell in unsupported_gen.go
-// and is declared through RunUnsupportedContract. The role contract tier of
-// the conformance package needs single-row SQL over the relational schema
-// and does not apply to a key-value store.
+// and is declared through RunUnsupportedContract.
 //
 // # Key layout
 //
