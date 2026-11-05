@@ -16,19 +16,19 @@ import (
 // configured metadata validation.
 
 // metadataMap reads a row's metadata as a raw-value map (empty for none).
-func metadataMap(r kv, issueID string) (*issueRecord, map[string]json.RawMessage, error) {
+func metadataMap(r kv, issueID string) (map[string]json.RawMessage, error) {
 	rec, err := getRecord(r, issueID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	m := make(map[string]json.RawMessage)
 	raw := string(rec.Issue.Metadata)
 	if raw != "" && raw != "null" {
 		if err := json.Unmarshal(rec.Issue.Metadata, &m); err != nil {
-			return nil, nil, fmt.Errorf("parse metadata for %s: %w", issueID, err)
+			return nil, fmt.Errorf("parse metadata for %s: %w", issueID, err)
 		}
 	}
-	return rec, m, nil
+	return m, nil
 }
 
 // writeMetadata validates the merged object and writes it through the
@@ -52,7 +52,7 @@ func (s *Store) MergeMetadata(ctx context.Context, issueID, key string, value js
 		return fmt.Errorf("%w: metadata value for key %q on %s is not valid JSON", storage.ErrValidation, key, issueID)
 	}
 	return s.run(ctx, func(t *txn) error {
-		_, m, err := metadataMap(t.kv, issueID)
+		m, err := metadataMap(t.kv, issueID)
 		if err != nil {
 			return err
 		}
@@ -111,7 +111,7 @@ func (s *Store) SlotGet(ctx context.Context, issueID, key string) (string, error
 // silent no-op that writes nothing.
 func (s *Store) SlotClear(ctx context.Context, issueID, key, actor string) error {
 	return s.run(ctx, func(t *txn) error {
-		_, m, err := metadataMap(t.kv, issueID)
+		m, err := metadataMap(t.kv, issueID)
 		if err != nil {
 			return err
 		}

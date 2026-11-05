@@ -462,7 +462,7 @@ func (m *issueMatcher) match(rec *issueRecord) (bool, error) {
 }
 
 // searchRecords returns every row the query and filter admit, in id order,
-// honouring the plane routing of issueops.searchInTx (SkipWisps).
+// honoring the plane routing of issueops.searchInTx (SkipWisps).
 func searchRecords(r kv, query string, filter types.IssueFilter) ([]*issueRecord, error) {
 	m, err := newIssueMatcher(r, query, filter)
 	if err != nil {

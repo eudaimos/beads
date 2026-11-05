@@ -75,12 +75,21 @@ func (t *txn) createIssue(issue *types.Issue, actor string, opts storage.BatchCr
 			return false, nil
 		}
 	}
+	keepStored := opts.RejectStaleUpserts && old != nil && !issue.UpdatedAt.After(old.Issue.UpdatedAt)
 	plane := planeIssues
 	if wisp {
 		plane = planeWisps
 	}
 	rec := &issueRecord{Issue: *issue, Plane: plane, ContentHash: issue.ContentHash, SourceRepo: issue.SourceRepo, IDPrefix: issue.IDPrefix}
 	rec.Issue.Labels = dedupeSorted(issue.Labels)
+	if keepStored {
+		// Equal timestamps keep every stored column (the SQL upsert's
+		// IF(VALUES(updated_at) > stored.updated_at) guard); only the
+		// snapshot's labels merge in.
+		merged := *old
+		merged.Issue.Labels = dedupeSorted(append(append([]string(nil), old.Issue.Labels...), issue.Labels...))
+		rec = &merged
+	}
 	if old != nil {
 		rec.Issue.IsBlocked = old.Issue.IsBlocked
 		rec.RowVersion = old.RowVersion + 1
@@ -140,7 +149,9 @@ func (t *txn) persistCreateDependencies(issues []*types.Issue, actor string, opt
 			}
 			err := t.addEdge(&d, actor, storage.DependencyAddOptions{SkipCycleCheck: false})
 			if err != nil {
-				if opts.SkipDependencyValidationErrors {
+				// A missing target is skipped silently, as the SQL batch path
+				// does; other refusals are skipped only when the options say so.
+				if isNotFound(err) || opts.SkipDependencyValidationErrors {
 					if opts.OnSkippedDependency != nil {
 						opts.OnSkippedDependency(d.IssueID, d.DependsOnID, err.Error())
 					}
@@ -185,7 +196,12 @@ func (t *txn) mintID(issue *types.Issue, actor string) (string, error) {
 	return "", fmt.Errorf("failed to generate a unique id for prefix %q", prefix)
 }
 
+// raiseChildCounter records that child number n exists under parent. A
+// parent with no row gets no counter (ReconcileSkipsMissingParentCounter).
 func (t *txn) raiseChildCounter(parent string, n int) error {
+	if ok, err := recordExists(t.kv, parent); err != nil || !ok {
+		return err
+	}
 	name := "child" + sep + parent
 	cur, err := readSeq(t.kv, name)
 	if err != nil {
@@ -234,6 +250,11 @@ func (s *Store) CreateIssuesWithFullOptions(ctx context.Context, issues []*types
 	if len(issues) == 0 {
 		return nil
 	}
+	if !opts.SkipDependencyValidationErrors {
+		if err := validateMixedBucketDependencies(issues); err != nil {
+			return err
+		}
+	}
 	return s.run(ctx, func(t *txn) error {
 		var accepted []*types.Issue
 		for _, issue := range issues {
@@ -250,6 +271,50 @@ func (s *Store) CreateIssuesWithFullOptions(ctx context.Context, issues []*types
 		}
 		return t.settleBlocked()
 	})
+}
+
+// validateMixedBucketDependencies mirrors the SQL batch rule: a batch that
+// mixes durable and wisp rows may not carry an inline edge across the two.
+func validateMixedBucketDependencies(issues []*types.Issue) error {
+	wispByID := map[string]bool{}
+	hasRegular, hasWisp := false, false
+	for _, issue := range issues {
+		if issue == nil {
+			continue
+		}
+		w := storageissueops.IsWisp(issue)
+		hasWisp = hasWisp || w
+		hasRegular = hasRegular || !w
+		if issue.ID != "" {
+			wispByID[issue.ID] = w
+		}
+	}
+	if !hasRegular || !hasWisp {
+		return nil
+	}
+	for _, issue := range issues {
+		if issue == nil {
+			continue
+		}
+		for _, dep := range issue.Dependencies {
+			if dep == nil {
+				continue
+			}
+			src, srcWisp := issue.ID, storageissueops.IsWisp(issue)
+			if dep.IssueID != "" {
+				src = dep.IssueID
+				if w, ok := wispByID[src]; ok {
+					srcWisp = w
+				}
+			}
+			dstWisp, ok := wispByID[dep.DependsOnID]
+			if !ok || srcWisp == dstWisp {
+				continue
+			}
+			return fmt.Errorf("mixed regular/wisp CreateIssues batch cannot include cross-bucket dependency %s -> %s; create the issues first, then add the in-batch dependency after both issues exist", src, dep.DependsOnID)
+		}
+	}
+	return nil
 }
 
 // --- read --------------------------------------------------------------------------

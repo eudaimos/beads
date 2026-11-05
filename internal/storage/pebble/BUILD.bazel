@@ -1,25 +1,36 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
     name = "pebble",
     srcs = [
         "blocked.go",
+        "bulk.go",
+        "claims.go",
         "codec.go",
         "comments.go",
         "config.go",
+        "depqueries.go",
         "deps.go",
         "doc.go",
         "errors.go",
         "events.go",
         "issues.go",
+        "iter.go",
         "keys.go",
         "kv.go",
         "labels.go",
+        "ready.go",
         "records.go",
+        "roles.go",
+        "search.go",
+        "slots.go",
         "sortutil.go",
+        "stats.go",
         "store.go",
+        "transaction.go",
         "txn.go",
         "unsupported_gen.go",
+        "wisps.go",
     ],
     importpath = "github.com/steveyegge/beads/internal/storage/pebble",
     visibility = ["//:__subpackages__"],
@@ -31,11 +42,26 @@ go_library(
         "//internal/storage/domain",
         "//internal/storage/issueops",
         "//internal/storage/rowid",
+        "//internal/storage/sqlbuild",
         "//internal/types",
         "//issueops",
         "//memoryops",
         "@com_github_cockroachdb_pebble_v2//:pebble",
         "@com_github_cockroachdb_pebble_v2//vfs",
+    ],
+)
+go_test(
+    name = "pebble_test",
+    srcs = [
+        "conformance_test.go",
+        "latency_test.go",
+    ],
+    embed = [":pebble"],
+    deps = [
+        "//backend/conformance",
+        "//internal/storage",
+        "//internal/types",
+        "//issueops",
     ],
 )
 

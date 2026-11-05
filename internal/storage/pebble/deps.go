@@ -217,10 +217,10 @@ func (t *txn) addEdge(dep *types.Dependency, actor string, opts storage.Dependen
 
 // removeEdge removes every edge from src to dst (any type, as the SQL
 // RemoveDependency does) and returns whether one existed.
-func (t *txn) removeEdge(src, dst, actor string, opts storage.DependencyRemoveOptions) (bool, error) {
+func (t *txn) removeEdge(src, dst, actor string, opts storage.DependencyRemoveOptions) error {
 	outs, err := outgoingEdges(t.kv, src)
 	if err != nil {
-		return false, err
+		return err
 	}
 	removed := false
 	for _, d := range outs {
@@ -228,7 +228,7 @@ func (t *txn) removeEdge(src, dst, actor string, opts storage.DependencyRemoveOp
 			continue
 		}
 		if err := deleteEdge(t.kv, d.IssueID, d.DependsOnID, string(d.Type)); err != nil {
-			return false, err
+			return err
 		}
 		removed = true
 		if d.Type.AffectsReadyWork() {
@@ -239,11 +239,11 @@ func (t *txn) removeEdge(src, dst, actor string, opts storage.DependencyRemoveOp
 		rec, err := getRecord(t.kv, src)
 		if err == nil {
 			if err := t.recordEvent(rec, types.EventDependencyRemoved, actor, strPtr(dst), nil, strPtr(fmt.Sprintf("Removed dependency: %s -> %s", src, dst))); err != nil {
-				return false, err
+				return err
 			}
 		}
 	}
-	return removed, nil
+	return nil
 }
 
 // wouldCycle reports whether an edge src -> dst of typ would close a cycle

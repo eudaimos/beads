@@ -193,12 +193,21 @@ func (s *Store) CountEvents(ctx context.Context, issueID string, limit int) (int
 	return int64(len(evs)), err
 }
 
+// GetAllEventsSince returns every event strictly after since (created_at >
+// since, as the SQL readers filter), oldest first.
 func (s *Store) GetAllEventsSince(ctx context.Context, since time.Time) ([]*types.Event, error) {
 	var out []*types.Event
 	err := s.read(func(r kv) error {
-		v, err := eventsSince(r, storage.EventCursor{CreatedAt: since.Add(-time.Nanosecond)}, "", 0)
-		out = v
-		return err
+		all, err := eventsSince(r, storage.EventCursor{}, "", 0)
+		if err != nil {
+			return err
+		}
+		for _, ev := range all {
+			if ev.CreatedAt.After(since) {
+				out = append(out, ev)
+			}
+		}
+		return nil
 	})
 	return out, err
 }

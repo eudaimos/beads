@@ -12,6 +12,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.80.0
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/charmbracelet/x/ansi v0.11.9
+	github.com/cockroachdb/pebble/v2 v2.1.7
 	github.com/creack/pty v1.1.24
 	github.com/dolthub/dolt/go v0.40.5-0.20261023035229-05e6bceb1a21
 	github.com/dolthub/driver/v2 v2.4.1
@@ -130,7 +131,6 @@ require (
 	github.com/cockroachdb/crlib v0.0.0-20241112164430-1264a2edc35b // indirect
 	github.com/cockroachdb/errors v1.11.3 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20230118201751-21c54148d20b // indirect
-	github.com/cockroachdb/pebble/v2 v2.1.7 // indirect
 	github.com/cockroachdb/redact v1.1.5 // indirect
 	github.com/cockroachdb/swiss v0.0.0-20260820225851-333444432258 // indirect
 	github.com/cockroachdb/tokenbucket v0.0.0-20230807174530-cc333fc44b06 // indirect

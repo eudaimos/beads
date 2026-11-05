@@ -265,7 +265,7 @@ func (s *Store) RemoveDependency(ctx context.Context, issueID, dependsOnID strin
 // EmitEvent records the history event when one existed.
 func (s *Store) RemoveDependencyWithOptions(ctx context.Context, issueID, dependsOnID string, actor string, opts storage.DependencyRemoveOptions) error {
 	return s.run(ctx, func(t *txn) error {
-		if _, err := t.removeEdge(issueID, dependsOnID, actor, opts); err != nil {
+		if err := t.removeEdge(issueID, dependsOnID, actor, opts); err != nil {
 			return err
 		}
 		return t.settleBlocked()

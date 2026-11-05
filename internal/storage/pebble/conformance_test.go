@@ -2,10 +2,7 @@ package pebble
 
 import (
 	"context"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
+	"reflect"
 	"testing"
 
 	"github.com/steveyegge/beads/backend/conformance"
@@ -13,27 +10,14 @@ import (
 )
 
 // unsupportedAllowlist is every method the generated shell answers with
-// ErrUnsupported, read from unsupported_gen.go itself so the declared set
-// can never drift from the stubs that implement it.
+// ErrUnsupported: the method set of the generated type itself, so the
+// declared set can never drift from the stubs that implement it.
 func unsupportedAllowlist(t *testing.T) map[string]string {
 	t.Helper()
-	src, err := os.ReadFile("unsupported_gen.go")
-	if err != nil {
-		t.Fatalf("read unsupported_gen.go: %v", err)
-	}
-	f, err := parser.ParseFile(token.NewFileSet(), "unsupported_gen.go", src, 0)
-	if err != nil {
-		t.Fatalf("parse unsupported_gen.go: %v", err)
-	}
+	shell := reflect.TypeOf(unsupportedDoltStorage{})
 	out := map[string]string{}
-	for _, decl := range f.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv == nil || len(fn.Recv.List) == 0 {
-			continue
-		}
-		if ident, ok := fn.Recv.List[0].Type.(*ast.Ident); ok && ident.Name == "unsupportedDoltStorage" {
-			out[fn.Name.Name] = "not implemented by the Phase 0 spike"
-		}
+	for i := 0; i < shell.NumMethod(); i++ {
+		out[shell.Method(i).Name] = "not implemented by the Phase 0 spike"
 	}
 	if len(out) == 0 {
 		t.Fatal("no generated stubs found; regenerate unsupported_gen.go")

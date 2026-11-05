@@ -24,9 +24,17 @@ func (s *Store) RunInTransaction(ctx context.Context, commitMsg string, fn func(
 	})
 }
 
-// transaction is storage.Transaction over one txn. Writes mark the rows
-// whose blocked state may change; the fixpoint runs once at commit.
+// transaction is storage.Transaction over one txn. Every write settles the
+// blocked-state fixpoint before returning, so a read inside the transaction
+// sees the flags its own writes imply (TransactionReadYourWrites).
 type transaction struct{ t *txn }
+
+func (x *transaction) settled(err error) error {
+	if err != nil {
+		return err
+	}
+	return x.t.settleBlocked()
+}
 
 var _ storage.Transaction = (*transaction)(nil)
 
@@ -34,7 +42,7 @@ func (x *transaction) CreateIssue(ctx context.Context, issue *types.Issue, actor
 	if _, err := x.t.createIssue(issue, actor, storage.BatchCreateOptions{SkipPrefixValidation: true}); err != nil {
 		return err
 	}
-	return x.t.persistCreateDependencies([]*types.Issue{issue}, actor, storage.BatchCreateOptions{})
+	return x.settled(x.t.persistCreateDependencies([]*types.Issue{issue}, actor, storage.BatchCreateOptions{}))
 }
 
 func (x *transaction) CreateIssues(ctx context.Context, issues []*types.Issue, actor string) error {
@@ -48,21 +56,21 @@ func (x *transaction) CreateIssues(ctx context.Context, issues []*types.Issue, a
 			accepted = append(accepted, issue)
 		}
 	}
-	return x.t.persistCreateDependencies(accepted, actor, storage.BatchCreateOptions{})
+	return x.settled(x.t.persistCreateDependencies(accepted, actor, storage.BatchCreateOptions{}))
 }
 
 func (x *transaction) UpdateIssue(ctx context.Context, id string, updates map[string]interface{}, actor string) error {
 	_, err := x.t.updateIssue(id, updates, actor, storage.UpdateIssueOptions{})
-	return err
+	return x.settled(err)
 }
 
 func (x *transaction) CloseIssue(ctx context.Context, id string, reason string, actor string, session string) error {
 	_, err := x.t.closeIssue(id, reason, actor, session, nil)
-	return err
+	return x.settled(err)
 }
 
 func (x *transaction) DeleteIssue(ctx context.Context, id string) error {
-	return x.t.deleteIssue(id)
+	return x.settled(x.t.deleteIssue(id))
 }
 
 func (x *transaction) GetIssue(ctx context.Context, id string) (*types.Issue, error) {
@@ -78,21 +86,19 @@ func (x *transaction) SearchIssueIDs(ctx context.Context, query string, filter t
 }
 
 func (x *transaction) AddDependency(ctx context.Context, dep *types.Dependency, actor string) error {
-	return x.t.addDependency(dep, actor, storage.DependencyAddOptions{EmitEvent: true})
+	return x.settled(x.t.addDependency(dep, actor, storage.DependencyAddOptions{EmitEvent: true}))
 }
 
 func (x *transaction) AddDependencyWithOptions(ctx context.Context, dep *types.Dependency, actor string, opts storage.DependencyAddOptions) error {
-	return x.t.addDependency(dep, actor, opts)
+	return x.settled(x.t.addDependency(dep, actor, opts))
 }
 
 func (x *transaction) RemoveDependency(ctx context.Context, issueID, dependsOnID string, actor string) error {
-	_, err := x.t.removeEdge(issueID, dependsOnID, actor, storage.DependencyRemoveOptions{EmitEvent: true})
-	return err
+	return x.settled(x.t.removeEdge(issueID, dependsOnID, actor, storage.DependencyRemoveOptions{EmitEvent: true}))
 }
 
 func (x *transaction) RemoveDependencyWithOptions(ctx context.Context, issueID, dependsOnID string, actor string, opts storage.DependencyRemoveOptions) error {
-	_, err := x.t.removeEdge(issueID, dependsOnID, actor, opts)
-	return err
+	return x.settled(x.t.removeEdge(issueID, dependsOnID, actor, opts))
 }
 
 func (x *transaction) GetDependencyRecords(ctx context.Context, issueID string) ([]*types.Dependency, error) {

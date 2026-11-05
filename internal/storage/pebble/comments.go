@@ -121,9 +121,17 @@ func (s *Store) AddIssueComment(ctx context.Context, issueID, author, text strin
 	return out, err
 }
 
+// AddComment is the AnnotationStore verb: on the SQL backends it records a
+// "commented" event and writes no comment row (the portable suite pins that),
+// unlike AddIssueComment.
 func (s *Store) AddComment(ctx context.Context, issueID, actor, comment string) error {
-	_, err := s.AddIssueComment(ctx, issueID, actor, comment)
-	return err
+	return s.run(ctx, func(t *txn) error {
+		rec, err := getRecord(t.kv, issueID)
+		if err != nil {
+			return err
+		}
+		return t.recordEvent(rec, types.EventCommented, actor, nil, nil, strPtr(comment))
+	})
 }
 
 func (s *Store) ImportIssueComment(ctx context.Context, issueID, author, text string, createdAt time.Time) (*types.Comment, error) {

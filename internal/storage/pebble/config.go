@@ -3,6 +3,7 @@ package pebble
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -287,6 +288,12 @@ func (s *Store) SetRepoMtime(ctx context.Context, repoPath, jsonlPath string, mt
 	return s.run(ctx, func(t *txn) error { return t.kv.set(repoMtimeKey(repoPath), data) })
 }
 
+// ClearRepoMtime deletes the record under the ABSOLUTE form of repoPath. The
+// SQL backends resolve the path before their DELETE while Set and Get use it
+// verbatim, and the conformance audit pins that asymmetry.
 func (s *Store) ClearRepoMtime(ctx context.Context, repoPath string) error {
+	if abs, err := filepath.Abs(repoPath); err == nil {
+		repoPath = abs
+	}
 	return s.run(ctx, func(t *txn) error { return t.kv.del(repoMtimeKey(repoPath)) })
 }
