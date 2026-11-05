@@ -5,28 +5,16 @@ package pebble
 
 import (
 	"context"
-	"encoding/json"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/types"
 	"github.com/steveyegge/beads/issueops"
 	"github.com/steveyegge/beads/memoryops"
-	"time"
 )
 
 // unsupportedDoltStorage is the generated typed-unsupported shell for storage.DoltStorage.
 // Every method returns *storage.ErrUnsupported via errUnsupported; embed it and
 // override the real slice. DO NOT hand-edit — regenerate with `go generate ./...`.
 type unsupportedDoltStorage struct{}
-
-func (unsupportedDoltStorage) AddDependency(_ context.Context, _ *types.Dependency, _ string) (err error) {
-	err = errUnsupported("AddDependency")
-	return
-}
-
-func (unsupportedDoltStorage) AddDependencyWithOptions(_ context.Context, _ *types.Dependency, _ string, _ storage.DependencyAddOptions) (err error) {
-	err = errUnsupported("AddDependencyWithOptions")
-	return
-}
 
 func (unsupportedDoltStorage) AddFederationPeer(_ context.Context, _ *storage.FederationPeer) (err error) {
 	err = errUnsupported("AddFederationPeer")
@@ -103,16 +91,6 @@ func (unsupportedDoltStorage) Checkout(_ context.Context, _ string) (err error) 
 	return
 }
 
-func (unsupportedDoltStorage) ClaimIssue(_ context.Context, _ string, _ string) (err error) {
-	err = errUnsupported("ClaimIssue")
-	return
-}
-
-func (unsupportedDoltStorage) ClaimReadyIssue(_ context.Context, _ types.WorkFilter, _ string) (_ *types.Issue, err error) {
-	err = errUnsupported("ClaimReadyIssue")
-	return
-}
-
 func (unsupportedDoltStorage) Commenter() (_ issueops.Commenter, err error) {
 	err = errUnsupported("Commenter")
 	return
@@ -158,26 +136,6 @@ func (unsupportedDoltStorage) CommitWithConfig(_ context.Context, _ string) (err
 	return
 }
 
-func (unsupportedDoltStorage) CountDependencies(_ context.Context, _ string) (_ int64, err error) {
-	err = errUnsupported("CountDependencies")
-	return
-}
-
-func (unsupportedDoltStorage) CountDependentRecords(_ context.Context, _ string, _ string) (_ int, err error) {
-	err = errUnsupported("CountDependentRecords")
-	return
-}
-
-func (unsupportedDoltStorage) CountDependents(_ context.Context, _ string) (_ int64, err error) {
-	err = errUnsupported("CountDependents")
-	return
-}
-
-func (unsupportedDoltStorage) CountDependentsByStatus(_ context.Context, _ string, _ types.Status) (_ int64, err error) {
-	err = errUnsupported("CountDependentsByStatus")
-	return
-}
-
 func (unsupportedDoltStorage) Counter() (_ issueops.Counter, err error) {
 	err = errUnsupported("Counter")
 	return
@@ -198,16 +156,6 @@ func (unsupportedDoltStorage) DeleteBranch(_ context.Context, _ string) (err err
 	return
 }
 
-func (unsupportedDoltStorage) DeleteIssues(_ context.Context, _ []string, _ bool, _ bool, _ bool) (_ *types.DeleteIssuesResult, err error) {
-	err = errUnsupported("DeleteIssues")
-	return
-}
-
-func (unsupportedDoltStorage) DeleteIssuesBySourceRepo(_ context.Context, _ string) (_ int, err error) {
-	err = errUnsupported("DeleteIssuesBySourceRepo")
-	return
-}
-
 func (unsupportedDoltStorage) Deleter() (_ issueops.Deleter, err error) {
 	err = errUnsupported("Deleter")
 	return
@@ -215,11 +163,6 @@ func (unsupportedDoltStorage) Deleter() (_ issueops.Deleter, err error) {
 
 func (unsupportedDoltStorage) DependencyEditor() (_ issueops.DependencyEditor, err error) {
 	err = errUnsupported("DependencyEditor")
-	return
-}
-
-func (unsupportedDoltStorage) DetectCycles(_ context.Context) (_ [][]*types.Issue, err error) {
-	err = errUnsupported("DetectCycles")
 	return
 }
 
@@ -238,23 +181,8 @@ func (unsupportedDoltStorage) Fetch(_ context.Context, _ string) (err error) {
 	return
 }
 
-func (unsupportedDoltStorage) FindWispDependentsRecursive(_ context.Context, _ []string) (_ map[string]bool, err error) {
-	err = errUnsupported("FindWispDependentsRecursive")
-	return
-}
-
 func (unsupportedDoltStorage) ForcePush(_ context.Context) (err error) {
 	err = errUnsupported("ForcePush")
-	return
-}
-
-func (unsupportedDoltStorage) GetAllDependencyRecords(_ context.Context) (_ map[string][]*types.Dependency, err error) {
-	err = errUnsupported("GetAllDependencyRecords")
-	return
-}
-
-func (unsupportedDoltStorage) GetBlockingInfoForIssues(_ context.Context, _ []string) (_ map[string][]string, _ map[string][]string, _ map[string]string, err error) {
-	err = errUnsupported("GetBlockingInfoForIssues")
 	return
 }
 
@@ -273,68 +201,8 @@ func (unsupportedDoltStorage) GetCurrentCommit(_ context.Context) (_ string, err
 	return
 }
 
-func (unsupportedDoltStorage) GetDependencies(_ context.Context, _ string) (_ []*types.Issue, err error) {
-	err = errUnsupported("GetDependencies")
-	return
-}
-
-func (unsupportedDoltStorage) GetDependenciesWithMetadata(_ context.Context, _ string) (_ []*types.IssueWithDependencyMetadata, err error) {
-	err = errUnsupported("GetDependenciesWithMetadata")
-	return
-}
-
-func (unsupportedDoltStorage) GetDependencyCounts(_ context.Context, _ []string) (_ map[string]*types.DependencyCounts, err error) {
-	err = errUnsupported("GetDependencyCounts")
-	return
-}
-
-func (unsupportedDoltStorage) GetDependencyRecords(_ context.Context, _ string) (_ []*types.Dependency, err error) {
-	err = errUnsupported("GetDependencyRecords")
-	return
-}
-
-func (unsupportedDoltStorage) GetDependencyRecordsForIssues(_ context.Context, _ []string) (_ map[string][]*types.Dependency, err error) {
-	err = errUnsupported("GetDependencyRecordsForIssues")
-	return
-}
-
-func (unsupportedDoltStorage) GetDependencyTree(_ context.Context, _ string, _ int, _ bool, _ bool) (_ []*types.TreeNode, err error) {
-	err = errUnsupported("GetDependencyTree")
-	return
-}
-
-func (unsupportedDoltStorage) GetDependentRecords(_ context.Context, _ string, _ string, _ int, _ string) (_ []*types.Dependency, err error) {
-	err = errUnsupported("GetDependentRecords")
-	return
-}
-
-func (unsupportedDoltStorage) GetDependentRecordsForIssues(_ context.Context, _ []string) (_ map[string][]*types.Dependency, err error) {
-	err = errUnsupported("GetDependentRecordsForIssues")
-	return
-}
-
-func (unsupportedDoltStorage) GetDependents(_ context.Context, _ string) (_ []*types.Issue, err error) {
-	err = errUnsupported("GetDependents")
-	return
-}
-
-func (unsupportedDoltStorage) GetDependentsWithMetadata(_ context.Context, _ string) (_ []*types.IssueWithDependencyMetadata, err error) {
-	err = errUnsupported("GetDependentsWithMetadata")
-	return
-}
-
 func (unsupportedDoltStorage) GetFederationPeer(_ context.Context, _ string) (_ *storage.FederationPeer, err error) {
 	err = errUnsupported("GetFederationPeer")
-	return
-}
-
-func (unsupportedDoltStorage) GetNewlyUnblockedByClose(_ context.Context, _ string) (_ []*types.Issue, err error) {
-	err = errUnsupported("GetNewlyUnblockedByClose")
-	return
-}
-
-func (unsupportedDoltStorage) GetNextChildID(_ context.Context, _ string) (_ string, err error) {
-	err = errUnsupported("GetNextChildID")
 	return
 }
 
@@ -368,11 +236,6 @@ func (unsupportedDoltStorage) HasRemote(_ context.Context, _ string) (_ bool, er
 	return
 }
 
-func (unsupportedDoltStorage) HeartbeatIssue(_ context.Context, _ string, _ string) (err error) {
-	err = errUnsupported("HeartbeatIssue")
-	return
-}
-
 func (unsupportedDoltStorage) Heartbeater() (_ issueops.Heartbeater, err error) {
 	err = errUnsupported("Heartbeater")
 	return
@@ -388,16 +251,6 @@ func (unsupportedDoltStorage) InitVerifier() (_ issueops.InitVerifier, err error
 	return
 }
 
-func (unsupportedDoltStorage) IsBlocked(_ context.Context, _ string) (_ bool, _ []string, err error) {
-	err = errUnsupported("IsBlocked")
-	return
-}
-
-func (unsupportedDoltStorage) IsBlockedBatch(_ context.Context, _ []string) (_ map[string]bool, err error) {
-	err = errUnsupported("IsBlockedBatch")
-	return
-}
-
 func (unsupportedDoltStorage) IssueClaimer() (_ issueops.Claimer, err error) {
 	err = errUnsupported("IssueClaimer")
 	return
@@ -410,21 +263,6 @@ func (unsupportedDoltStorage) IssueReader() (_ issueops.Reader, err error) {
 
 func (unsupportedDoltStorage) IssueRelations() (_ issueops.Relations, err error) {
 	err = errUnsupported("IssueRelations")
-	return
-}
-
-func (unsupportedDoltStorage) IterAllDependencyRecords(_ context.Context) (_ storage.Iter[types.Dependency], err error) {
-	err = errUnsupported("IterAllDependencyRecords")
-	return
-}
-
-func (unsupportedDoltStorage) IterDependenciesWithMetadata(_ context.Context, _ string) (_ storage.Iter[types.IssueWithDependencyMetadata], err error) {
-	err = errUnsupported("IterDependenciesWithMetadata")
-	return
-}
-
-func (unsupportedDoltStorage) IterDependentsWithMetadata(_ context.Context, _ string) (_ storage.Iter[types.IssueWithDependencyMetadata], err error) {
-	err = errUnsupported("IterDependentsWithMetadata")
 	return
 }
 
@@ -463,11 +301,6 @@ func (unsupportedDoltStorage) Merge(_ context.Context, _ string) (_ []storage.Co
 	return
 }
 
-func (unsupportedDoltStorage) MergeMetadata(_ context.Context, _ string, _ string, _ json.RawMessage, _ string) (err error) {
-	err = errUnsupported("MergeMetadata")
-	return
-}
-
 func (unsupportedDoltStorage) MergeSlotAcquire(_ context.Context, _ string, _ string, _ bool) (_ *storage.MergeSlotResult, err error) {
 	err = errUnsupported("MergeSlotAcquire")
 	return
@@ -495,11 +328,6 @@ func (unsupportedDoltStorage) MetadataCAS() (_ issueops.MetadataCAS, err error) 
 
 func (unsupportedDoltStorage) MoleculeStepper() (_ issueops.MoleculeStepper, err error) {
 	err = errUnsupported("MoleculeStepper")
-	return
-}
-
-func (unsupportedDoltStorage) PromoteFromEphemeral(_ context.Context, _ string, _ string) (err error) {
-	err = errUnsupported("PromoteFromEphemeral")
 	return
 }
 
@@ -548,11 +376,6 @@ func (unsupportedDoltStorage) ReadyCounter() (_ issueops.ReadyCounter, err error
 	return
 }
 
-func (unsupportedDoltStorage) ReclaimExpiredLeases(_ context.Context, _ time.Duration, _ types.ReclaimFilter, _ string) (_ []types.ReclaimedLease, err error) {
-	err = errUnsupported("ReclaimExpiredLeases")
-	return
-}
-
 func (unsupportedDoltStorage) RecordProvenanceEvent(_ context.Context, _ types.ProvenanceEvent) (_ string, _ bool, err error) {
 	err = errUnsupported("RecordProvenanceEvent")
 	return
@@ -560,16 +383,6 @@ func (unsupportedDoltStorage) RecordProvenanceEvent(_ context.Context, _ types.P
 
 func (unsupportedDoltStorage) Releaser() (_ issueops.Releaser, err error) {
 	err = errUnsupported("Releaser")
-	return
-}
-
-func (unsupportedDoltStorage) RemoveDependency(_ context.Context, _ string, _ string, _ string) (err error) {
-	err = errUnsupported("RemoveDependency")
-	return
-}
-
-func (unsupportedDoltStorage) RemoveDependencyWithOptions(_ context.Context, _ string, _ string, _ string, _ storage.DependencyRemoveOptions) (err error) {
-	err = errUnsupported("RemoveDependencyWithOptions")
 	return
 }
 
@@ -595,21 +408,6 @@ func (unsupportedDoltStorage) RestoreFromSnapshot(_ context.Context, _ string) (
 
 func (unsupportedDoltStorage) RunInIssueLifecycleTransaction(_ context.Context, _ string, _ func(storage.IssueLifecycleTransaction) error) (err error) {
 	err = errUnsupported("RunInIssueLifecycleTransaction")
-	return
-}
-
-func (unsupportedDoltStorage) SlotClear(_ context.Context, _ string, _ string, _ string) (err error) {
-	err = errUnsupported("SlotClear")
-	return
-}
-
-func (unsupportedDoltStorage) SlotGet(_ context.Context, _ string, _ string) (_ string, err error) {
-	err = errUnsupported("SlotGet")
-	return
-}
-
-func (unsupportedDoltStorage) SlotSet(_ context.Context, _ string, _ string, _ string, _ string) (err error) {
-	err = errUnsupported("SlotSet")
 	return
 }
 
@@ -648,11 +446,6 @@ func (unsupportedDoltStorage) TreeWalker() (_ issueops.TreeWalker, err error) {
 	return
 }
 
-func (unsupportedDoltStorage) UpdateIssueID(_ context.Context, _ string, _ string, _ *types.Issue, _ string) (err error) {
-	err = errUnsupported("UpdateIssueID")
-	return
-}
-
 func (unsupportedDoltStorage) VersionReconciler() (_ issueops.VersionReconciler, err error) {
 	err = errUnsupported("VersionReconciler")
 	return
@@ -663,4 +456,4 @@ func (unsupportedDoltStorage) WorkspaceConfig() (_ issueops.WorkspaceConfig, err
 	return
 }
 
-// NOTE: partial shell (129 of 205 methods generated; 76 left to this package's hand-written set).
+// NOTE: partial shell (88 of 205 methods generated; 117 left to this package's hand-written set).
