@@ -178,16 +178,6 @@ func (unsupportedDoltStorage) CountDependentsByStatus(_ context.Context, _ strin
 	return
 }
 
-func (unsupportedDoltStorage) CountIssues(_ context.Context, _ string, _ types.IssueFilter) (_ int64, err error) {
-	err = errUnsupported("CountIssues")
-	return
-}
-
-func (unsupportedDoltStorage) CountIssuesByGroup(_ context.Context, _ types.IssueFilter, _ string) (_ map[string]int, err error) {
-	err = errUnsupported("CountIssuesByGroup")
-	return
-}
-
 func (unsupportedDoltStorage) Counter() (_ issueops.Counter, err error) {
 	err = errUnsupported("Counter")
 	return
@@ -263,11 +253,6 @@ func (unsupportedDoltStorage) GetAllDependencyRecords(_ context.Context) (_ map[
 	return
 }
 
-func (unsupportedDoltStorage) GetBlockedIssues(_ context.Context, _ types.WorkFilter) (_ []*types.BlockedIssue, err error) {
-	err = errUnsupported("GetBlockedIssues")
-	return
-}
-
 func (unsupportedDoltStorage) GetBlockingInfoForIssues(_ context.Context, _ []string) (_ map[string][]string, _ map[string][]string, _ map[string]string, err error) {
 	err = errUnsupported("GetBlockingInfoForIssues")
 	return
@@ -338,23 +323,8 @@ func (unsupportedDoltStorage) GetDependentsWithMetadata(_ context.Context, _ str
 	return
 }
 
-func (unsupportedDoltStorage) GetEpicsEligibleForClosure(_ context.Context) (_ []*types.EpicStatus, err error) {
-	err = errUnsupported("GetEpicsEligibleForClosure")
-	return
-}
-
 func (unsupportedDoltStorage) GetFederationPeer(_ context.Context, _ string) (_ *storage.FederationPeer, err error) {
 	err = errUnsupported("GetFederationPeer")
-	return
-}
-
-func (unsupportedDoltStorage) GetMoleculeLastActivity(_ context.Context, _ string) (_ *types.MoleculeLastActivity, err error) {
-	err = errUnsupported("GetMoleculeLastActivity")
-	return
-}
-
-func (unsupportedDoltStorage) GetMoleculeProgress(_ context.Context, _ string) (_ *types.MoleculeProgressStats, err error) {
-	err = errUnsupported("GetMoleculeProgress")
 	return
 }
 
@@ -375,36 +345,6 @@ func (unsupportedDoltStorage) GetProvenanceByRef(_ context.Context, _ string) (_
 
 func (unsupportedDoltStorage) GetProvenanceEvents(_ context.Context, _ string, _ string) (_ []types.ProvenanceEvent, err error) {
 	err = errUnsupported("GetProvenanceEvents")
-	return
-}
-
-func (unsupportedDoltStorage) GetReadyWork(_ context.Context, _ types.WorkFilter) (_ []*types.Issue, err error) {
-	err = errUnsupported("GetReadyWork")
-	return
-}
-
-func (unsupportedDoltStorage) GetReadyWorkWithCounts(_ context.Context, _ types.WorkFilter) (_ []*types.IssueWithCounts, err error) {
-	err = errUnsupported("GetReadyWorkWithCounts")
-	return
-}
-
-func (unsupportedDoltStorage) GetReadyWorkWithCountsAndTotal(_ context.Context, _ types.WorkFilter) (_ []*types.IssueWithCounts, _ int, err error) {
-	err = errUnsupported("GetReadyWorkWithCountsAndTotal")
-	return
-}
-
-func (unsupportedDoltStorage) GetStaleIssues(_ context.Context, _ types.StaleFilter) (_ []*types.Issue, err error) {
-	err = errUnsupported("GetStaleIssues")
-	return
-}
-
-func (unsupportedDoltStorage) GetStatistics(_ context.Context) (_ *types.Statistics, err error) {
-	err = errUnsupported("GetStatistics")
-	return
-}
-
-func (unsupportedDoltStorage) GetStatisticsNoBlocked(_ context.Context) (_ *types.Statistics, err error) {
-	err = errUnsupported("GetStatisticsNoBlocked")
 	return
 }
 
@@ -483,11 +423,6 @@ func (unsupportedDoltStorage) IterAllDependencyRecords(_ context.Context) (_ sto
 	return
 }
 
-func (unsupportedDoltStorage) IterBlockedIssues(_ context.Context, _ types.WorkFilter) (_ storage.Iter[types.BlockedIssue], err error) {
-	err = errUnsupported("IterBlockedIssues")
-	return
-}
-
 func (unsupportedDoltStorage) IterDependenciesWithMetadata(_ context.Context, _ string) (_ storage.Iter[types.IssueWithDependencyMetadata], err error) {
 	err = errUnsupported("IterDependenciesWithMetadata")
 	return
@@ -495,21 +430,6 @@ func (unsupportedDoltStorage) IterDependenciesWithMetadata(_ context.Context, _ 
 
 func (unsupportedDoltStorage) IterDependentsWithMetadata(_ context.Context, _ string) (_ storage.Iter[types.IssueWithDependencyMetadata], err error) {
 	err = errUnsupported("IterDependentsWithMetadata")
-	return
-}
-
-func (unsupportedDoltStorage) IterIssues(_ context.Context, _ string, _ types.IssueFilter) (_ storage.Iter[types.Issue], err error) {
-	err = errUnsupported("IterIssues")
-	return
-}
-
-func (unsupportedDoltStorage) IterReadyWork(_ context.Context, _ types.WorkFilter) (_ storage.Iter[types.Issue], err error) {
-	err = errUnsupported("IterReadyWork")
-	return
-}
-
-func (unsupportedDoltStorage) IterWisps(_ context.Context, _ types.WispFilter) (_ storage.Iter[types.Issue], err error) {
-	err = errUnsupported("IterWisps")
 	return
 }
 
@@ -530,11 +450,6 @@ func (unsupportedDoltStorage) ListFederationPeers(_ context.Context) (_ []*stora
 
 func (unsupportedDoltStorage) ListRemotes(_ context.Context) (_ []storage.RemoteInfo, err error) {
 	err = errUnsupported("ListRemotes")
-	return
-}
-
-func (unsupportedDoltStorage) ListWisps(_ context.Context, _ types.WispFilter) (_ []*types.Issue, err error) {
-	err = errUnsupported("ListWisps")
 	return
 }
 
@@ -693,26 +608,6 @@ func (unsupportedDoltStorage) RunInTransaction(_ context.Context, _ string, _ fu
 	return
 }
 
-func (unsupportedDoltStorage) SearchIssueIDs(_ context.Context, _ string, _ types.IssueFilter) (_ []string, err error) {
-	err = errUnsupported("SearchIssueIDs")
-	return
-}
-
-func (unsupportedDoltStorage) SearchIssueSummaries(_ context.Context, _ string, _ types.IssueFilter) (_ []*types.IssueSummary, err error) {
-	err = errUnsupported("SearchIssueSummaries")
-	return
-}
-
-func (unsupportedDoltStorage) SearchIssues(_ context.Context, _ string, _ types.IssueFilter) (_ []*types.Issue, err error) {
-	err = errUnsupported("SearchIssues")
-	return
-}
-
-func (unsupportedDoltStorage) SearchIssuesWithCounts(_ context.Context, _ string, _ types.IssueFilter) (_ []*types.IssueWithCounts, err error) {
-	err = errUnsupported("SearchIssuesWithCounts")
-	return
-}
-
 func (unsupportedDoltStorage) SlotClear(_ context.Context, _ string, _ string, _ string) (err error) {
 	err = errUnsupported("SlotClear")
 	return
@@ -778,4 +673,4 @@ func (unsupportedDoltStorage) WorkspaceConfig() (_ issueops.WorkspaceConfig, err
 	return
 }
 
-// NOTE: partial shell (152 of 205 methods generated; 53 left to this package's hand-written set).
+// NOTE: partial shell (131 of 205 methods generated; 74 left to this package's hand-written set).
