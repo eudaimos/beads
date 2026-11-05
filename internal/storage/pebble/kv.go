@@ -71,8 +71,12 @@ func pebbleGet(value []byte, closer io.Closer, err error) ([]byte, bool, error) 
 	return out, true, nil
 }
 
-func scanIter(it *pebble.Iterator, fn func(key, value []byte) (bool, error)) error {
-	defer it.Close()
+func scanIter(it *pebble.Iterator, fn func(key, value []byte) (bool, error)) (err error) {
+	defer func() {
+		if cerr := it.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
 	for ok := it.First(); ok; ok = it.Next() {
 		more, err := fn(it.Key(), it.Value())
 		if err != nil {

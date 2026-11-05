@@ -463,11 +463,6 @@ func (unsupportedDoltStorage) IssueClaimer() (_ issueops.Claimer, err error) {
 	return
 }
 
-func (unsupportedDoltStorage) IssueLifecycle() (_ issueops.Lifecycle, err error) {
-	err = errUnsupported("IssueLifecycle")
-	return
-}
-
 func (unsupportedDoltStorage) IssueReader() (_ issueops.Reader, err error) {
 	err = errUnsupported("IssueReader")
 	return
@@ -778,4 +773,4 @@ func (unsupportedDoltStorage) WorkspaceConfig() (_ issueops.WorkspaceConfig, err
 	return
 }
 
-// NOTE: partial shell (152 of 205 methods generated; 53 left to this package's hand-written set).
+// NOTE: partial shell (151 of 205 methods generated; 54 left to this package's hand-written set).

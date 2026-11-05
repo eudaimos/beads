@@ -54,17 +54,17 @@ func nextLiveCommentTime(r kv, id string, now time.Time) (time.Time, error) {
 }
 
 // insertComment writes one comment with the derived id the SQL backends
-// mint (rowid over issue, author, text, created_at) and reports whether an
-// identical comment already existed.
-func (t *txn) insertComment(rec *issueRecord, author, text string, createdAt time.Time) (*types.Comment, bool, error) {
+// mint (rowid over issue, author, text, created_at); an identical comment
+// already stored is returned instead of duplicated.
+func (t *txn) insertComment(rec *issueRecord, author, text string, createdAt time.Time) (*types.Comment, error) {
 	createdAt = createdAt.UTC()
 	existing, err := commentsOf(t.kv, rec.Issue.ID)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	for _, c := range existing {
 		if c.Author == author && c.Text == text && c.CreatedAt.Equal(createdAt) {
-			return c, true, nil
+			return c, nil
 		}
 	}
 	table := "comments"
@@ -77,14 +77,14 @@ func (t *txn) insertComment(rec *issueRecord, author, text string, createdAt tim
 	})
 	seq, err := nextSeq(t.kv, "comments")
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	c := &types.Comment{ID: rowid.New(table, 0, digest), IssueID: rec.Issue.ID, Author: author, Text: text, CreatedAt: createdAt}
 	data, err := encodeJSON(c)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	return c, false, t.kv.set(commentKey(rec.Issue.ID, createdAt.UnixNano(), seq), data)
+	return c, t.kv.set(commentKey(rec.Issue.ID, createdAt.UnixNano(), seq), data)
 }
 
 // addLiveComment is the AddIssueComment / AddComment body: a comment stamped
@@ -101,7 +101,7 @@ func (t *txn) addLiveComment(id, author, text string) (*types.Comment, error) {
 	if err != nil {
 		return nil, err
 	}
-	c, _, err := t.insertComment(rec, author, text, at)
+	c, err := t.insertComment(rec, author, text, at)
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +139,7 @@ func (s *Store) ImportIssueComment(ctx context.Context, issueID, author, text st
 				return err
 			}
 		}
-		c, _, err := t.insertComment(rec, author, text, createdAt)
+		c, err := t.insertComment(rec, author, text, createdAt)
 		out = c
 		return err
 	})

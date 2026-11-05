@@ -21,12 +21,12 @@ import (
 // an upsert, as on the SQL backends: an existing row takes the snapshot's
 // content and keeps its blocked flag and row version (+1). The returned
 // flags report whether a row was written and whether it was new.
-func (t *txn) createIssue(issue *types.Issue, actor string, opts storage.BatchCreateOptions) (written, isNew bool, err error) {
+func (t *txn) createIssue(issue *types.Issue, actor string, opts storage.BatchCreateOptions) (written bool, err error) {
 	if issue == nil {
-		return false, false, fmt.Errorf("issue must not be nil")
+		return false, fmt.Errorf("issue must not be nil")
 	}
 	if err := validateID(issue.ID); err != nil {
-		return false, false, err
+		return false, err
 	}
 	infra := infraTypes(t.kv)
 	wisp := isWispPlane(issue, infra)
@@ -35,7 +35,7 @@ func (t *txn) createIssue(issue *types.Issue, actor string, opts storage.BatchCr
 	}
 	statuses, err := customStatuses(t.kv)
 	if err != nil {
-		return false, false, err
+		return false, err
 	}
 	statusNames := make([]string, 0, len(statuses))
 	for _, st := range statuses {
@@ -43,15 +43,15 @@ func (t *txn) createIssue(issue *types.Issue, actor string, opts storage.BatchCr
 	}
 	typeNames, err := customTypes(t.kv)
 	if err != nil {
-		return false, false, err
+		return false, err
 	}
 	if err := storageissueops.PrepareIssueForInsert(issue, statusNames, typeNames); err != nil {
-		return false, false, err
+		return false, err
 	}
 	if issue.ID == "" {
-		id, err := t.mintID(issue, actor, opts)
+		id, err := t.mintID(issue, actor)
 		if err != nil {
-			return false, false, err
+			return false, err
 		}
 		issue.ID = id
 	} else if !opts.SkipPrefixValidation && !opts.CreateOnly {
@@ -59,20 +59,20 @@ func (t *txn) createIssue(issue *types.Issue, actor string, opts storage.BatchCr
 	}
 	old, err := getRecord(t.kv, issue.ID)
 	if err != nil && !isNotFound(err) {
-		return false, false, err
+		return false, err
 	}
 	if old != nil {
 		if opts.ConflictSkip {
-			return false, false, nil
+			return false, nil
 		}
 		if opts.CreateOnly {
-			return false, false, fmt.Errorf("%w: %s", storage.ErrAlreadyExists, issue.ID)
+			return false, fmt.Errorf("%w: %s", storage.ErrAlreadyExists, issue.ID)
 		}
 		if opts.RejectStaleUpserts && old.Issue.UpdatedAt.After(issue.UpdatedAt) {
 			if opts.OnStaleRejected != nil {
 				opts.OnStaleRejected(issue.ID)
 			}
-			return false, false, nil
+			return false, nil
 		}
 	}
 	plane := planeIssues
@@ -90,16 +90,16 @@ func (t *txn) createIssue(issue *types.Issue, actor string, opts storage.BatchCr
 		rec.RowVersion = 1
 	}
 	if err := putRecord(t.kv, old, rec); err != nil {
-		return false, false, err
+		return false, err
 	}
-	isNew = old == nil
+	isNew := old == nil
 	if isNew {
 		if err := t.recordEvent(rec, types.EventCreated, actor, strPtr(""), strPtr(""), nil); err != nil {
-			return false, false, err
+			return false, err
 		}
 		if parent, n, ok := storageissueops.ParseHierarchicalID(issue.ID); ok && n > 0 {
 			if err := t.raiseChildCounter(parent, n); err != nil {
-				return false, false, err
+				return false, err
 			}
 		}
 	}
@@ -111,19 +111,19 @@ func (t *txn) createIssue(issue *types.Issue, actor string, opts storage.BatchCr
 		if at.IsZero() {
 			at, err = nextLiveCommentTime(t.kv, issue.ID, nowUTC())
 			if err != nil {
-				return false, false, err
+				return false, err
 			}
 		}
-		stored, _, err := t.insertComment(rec, c.Author, c.Text, at)
+		stored, err := t.insertComment(rec, c.Author, c.Text, at)
 		if err != nil {
-			return false, false, err
+			return false, err
 		}
 		c.ID, c.CreatedAt = stored.ID, stored.CreatedAt
 	}
 	issue.RowVersion = rec.RowVersion
 	issue.Labels = rec.Issue.Labels
 	t.markBlockedDirty(issue.ID)
-	return true, isNew, nil
+	return true, nil
 }
 
 // persistCreateDependencies writes the inline dependencies a create carries,
@@ -157,7 +157,7 @@ func (t *txn) persistCreateDependencies(issues []*types.Issue, actor string, opt
 // mintID generates an id for a create without one, the way the SQL backends
 // do: the configured prefix (or the issue's override) and a content hash of
 // growing length until it is free.
-func (t *txn) mintID(issue *types.Issue, actor string, opts storage.BatchCreateOptions) (string, error) {
+func (t *txn) mintID(issue *types.Issue, actor string) (string, error) {
 	prefix := issue.PrefixOverride
 	if prefix == "" {
 		cfg, err := getConfig(t.kv, "issue_prefix")
@@ -216,7 +216,7 @@ func dedupeSorted(labels []string) []string {
 
 func (s *Store) CreateIssue(ctx context.Context, issue *types.Issue, actor string) error {
 	return s.run(ctx, func(t *txn) error {
-		if _, _, err := t.createIssue(issue, actor, storage.BatchCreateOptions{SkipPrefixValidation: true}); err != nil {
+		if _, err := t.createIssue(issue, actor, storage.BatchCreateOptions{SkipPrefixValidation: true}); err != nil {
 			return err
 		}
 		if err := t.persistCreateDependencies([]*types.Issue{issue}, actor, storage.BatchCreateOptions{}); err != nil {
@@ -237,7 +237,7 @@ func (s *Store) CreateIssuesWithFullOptions(ctx context.Context, issues []*types
 	return s.run(ctx, func(t *txn) error {
 		var accepted []*types.Issue
 		for _, issue := range issues {
-			written, _, err := t.createIssue(issue, actor, opts)
+			written, err := t.createIssue(issue, actor, opts)
 			if err != nil {
 				return err
 			}
@@ -327,36 +327,55 @@ func (s *Store) GetIssueByExternalRef(ctx context.Context, externalRef string) (
 // updateIssue applies an updates map to a row the way updateIssueInTx does:
 // no-op fields are discarded, closed_at / started_at / lease follow the
 // status change, the event type is derived, and the row version is minted.
-func (t *txn) updateIssue(id string, updates map[string]interface{}, actor string, opts storage.UpdateIssueOptions) (*types.Issue, bool, error) {
+func (t *txn) updateIssue(id string, updates map[string]interface{}, actor string, opts storage.UpdateIssueOptions) (bool, error) {
 	rec, err := getRecord(t.kv, id)
 	if err != nil {
-		return nil, false, err
+		return false, err
 	}
 	oldIssue := rec.toIssue()
 	if opts.ExpectedVersion != nil && *opts.ExpectedVersion != rec.RowVersion {
-		return nil, false, fmt.Errorf("%w: issue %s is at version %d, expected %d", storage.ErrVersionMismatch, id, rec.RowVersion, *opts.ExpectedVersion)
+		return false, fmt.Errorf("%w: issue %s is at version %d, expected %d", storage.ErrVersionMismatch, id, rec.RowVersion, *opts.ExpectedVersion)
 	}
 	if opts.ExpectedAssignee != nil && *opts.ExpectedAssignee != oldIssue.Assignee {
-		return nil, false, fmt.Errorf("%w: issue %s is assigned to %q, expected %q", storage.ErrAssigneeMismatch, id, oldIssue.Assignee, *opts.ExpectedAssignee)
+		return false, fmt.Errorf("%w: issue %s is assigned to %q, expected %q", storage.ErrAssigneeMismatch, id, oldIssue.Assignee, *opts.ExpectedAssignee)
 	}
 	if opts.ExpectedStatus != nil && *opts.ExpectedStatus != string(oldIssue.Status) {
-		return nil, false, fmt.Errorf("%w: issue %s is %q, expected %q", storage.ErrStatusMismatch, id, oldIssue.Status, *opts.ExpectedStatus)
+		return false, fmt.Errorf("%w: issue %s is %q, expected %q", storage.ErrStatusMismatch, id, oldIssue.Status, *opts.ExpectedStatus)
 	}
 	updates = cloneUpdates(updates)
-	storageissueops.PopForceClosePolicy(updates)
+	forceClosePolicy := storageissueops.PopForceClosePolicy(updates)
+	updates, err = storageissueops.ResolveMergeOps(oldIssue, updates)
+	if err != nil {
+		return false, err
+	}
 	if err := storageissueops.ValidateClosedAtCoherence(oldIssue, updates); err != nil {
-		return nil, false, err
+		return false, err
 	}
 	updates, err = storageissueops.DiscardNoopIssueUpdates(oldIssue, updates)
 	if err != nil {
-		return nil, false, err
+		return false, err
 	}
 	if len(updates) == 0 {
-		return oldIssue, false, nil
+		return false, nil
 	}
 	for key := range updates {
 		if !storageissueops.IsAllowedUpdateField(key) {
-			return nil, false, fmt.Errorf("invalid field for update: %s", key)
+			return false, fmt.Errorf("invalid field for update: %s", key)
+		}
+	}
+	if raw, ok := updates["status"]; ok && !forceClosePolicy {
+		if cat, err := statusCategory(t.kv, types.Status(statusString(raw))); err != nil {
+			return false, err
+		} else if cat == types.CategoryDone && open(oldIssue.Status) && closePolicyRefusesOpenChildren(t.kv) {
+			children, err := childrenOf(t.kv, id)
+			if err != nil {
+				return false, err
+			}
+			for _, c := range children {
+				if child, err := getRecord(t.kv, c); err == nil && open(child.Issue.Status) {
+					return false, fmt.Errorf("%w: %s has open children", storage.ErrCloseOpenChildren, id)
+				}
+			}
 		}
 	}
 	old := *rec
@@ -364,7 +383,7 @@ func (t *txn) updateIssue(id string, updates map[string]interface{}, actor strin
 	newIssue := rec.Issue
 	for key, value := range updates {
 		if err := applyUpdateField(&newIssue, key, value); err != nil {
-			return nil, false, err
+			return false, err
 		}
 	}
 	if rawStatus, ok := updates["status"]; ok {
@@ -404,23 +423,23 @@ func (t *txn) updateIssue(id string, updates map[string]interface{}, actor strin
 	rec.ContentHash = rec.Issue.ComputeContentHash()
 	rec.RowVersion++
 	if err := putRecord(t.kv, &old, rec); err != nil {
-		return nil, false, err
+		return false, err
 	}
 	if storageissueops.ManageLeaseOnUpdate(oldIssue, updates) {
 		if err := t.kv.del(leaseKey(id)); err != nil {
-			return nil, false, err
+			return false, err
 		}
 	}
 	oldData, _ := json.Marshal(oldIssue)
 	newData, _ := json.Marshal(updates)
 	eventType := storageissueops.DetermineEventType(oldIssue, updates)
 	if err := t.recordEvent(rec, eventType, actor, strPtr(string(oldData)), strPtr(string(newData)), nil); err != nil {
-		return nil, false, err
+		return false, err
 	}
 	if _, ok := updates["status"]; ok {
 		t.markBlockedDirty(id)
 	}
-	return rec.toIssue(), true, nil
+	return true, nil
 }
 
 func cloneUpdates(updates map[string]interface{}) map[string]interface{} {
@@ -711,7 +730,7 @@ func (s *Store) UpdateIssue(ctx context.Context, id string, updates map[string]i
 
 func (s *Store) UpdateIssueChecked(ctx context.Context, id string, updates map[string]interface{}, actor string, opts storage.UpdateIssueOptions) error {
 	return s.run(ctx, func(t *txn) error {
-		if _, _, err := t.updateIssue(id, updates, actor, opts); err != nil {
+		if _, err := t.updateIssue(id, updates, actor, opts); err != nil {
 			return err
 		}
 		return t.settleBlocked()
@@ -808,7 +827,7 @@ func (s *Store) CloseIssueChecked(ctx context.Context, id string, actor string, 
 	return result, err
 }
 
-// closePolicyRefusesOpenChildren reads the close policy; the spike honours
+// closePolicyRefusesOpenChildren reads the close policy; the spike honors
 // only the explicit "strict" setting, the SQL backends' default being to
 // allow a close over open children.
 func closePolicyRefusesOpenChildren(r kv) bool {
@@ -897,7 +916,7 @@ func (t *txn) unclaim(id, actor string, expectedAssignee *string, force bool) er
 		return fmt.Errorf("%w: issue %s is assigned to %q", storage.ErrAssigneeMismatch, id, rec.Issue.Assignee)
 	}
 	updates := map[string]interface{}{"assignee": "", "status": string(types.StatusOpen)}
-	_, _, err = t.updateIssue(id, updates, actor, storage.UpdateIssueOptions{})
+	_, err = t.updateIssue(id, updates, actor, storage.UpdateIssueOptions{})
 	return err
 }
 

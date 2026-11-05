@@ -23,7 +23,7 @@ import (
 //     "any-children" and S has at least one closed child).
 //
 // A closed or pinned row is never blocked. The stored flag is recomputed to
-// a fixpoint over the neighbourhood a write can affect: the touched rows,
+// a fixpoint over the neighborhood a write can affect: the touched rows,
 // everything that depends on them (reverse edges of ready-affecting types),
 // and the parent-child descendants of all of those, repeated until no flag
 // changes.
@@ -194,10 +194,10 @@ func gateMode(metadata string) string {
 	return "all-children"
 }
 
-// affectedNeighbourhood expands seeds to every row whose flag can change
+// affectedNeighborhood expands seeds to every row whose flag can change
 // when the seeds' state did: the seeds, the rows depending on them through
 // ready-affecting edges (transitively), and parent-child descendants.
-func affectedNeighbourhood(r kv, seeds map[string]bool) ([]string, error) {
+func affectedNeighborhood(r kv, seeds map[string]bool) ([]string, error) {
 	seen := map[string]bool{}
 	var queue, out []string
 	for id := range seeds {
@@ -233,12 +233,12 @@ func affectedNeighbourhood(r kv, seeds map[string]bool) ([]string, error) {
 }
 
 // settleBlocked recomputes the flag over the transaction's dirty
-// neighbourhood to a fixpoint. It is called once, before commit.
+// neighborhood to a fixpoint. It is called once, before commit.
 func (t *txn) settleBlocked() error {
 	if len(t.dirtyBlocked) == 0 {
 		return nil
 	}
-	ids, err := affectedNeighbourhood(t.kv, t.dirtyBlocked)
+	ids, err := affectedNeighborhood(t.kv, t.dirtyBlocked)
 	if err != nil {
 		return err
 	}

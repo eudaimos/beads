@@ -10,7 +10,7 @@ type txn struct {
 	kv    kv
 	ctx   context.Context
 
-	// dirtyBlocked collects the ids whose neighbourhood a write in this
+	// dirtyBlocked collects the ids whose neighborhood a write in this
 	// transaction may have changed; recomputeBlocked settles them.
 	dirtyBlocked map[string]bool
 }

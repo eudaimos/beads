@@ -6,7 +6,7 @@
 // number of SQL round trips the issueops write path makes to maintain its
 // invariants (blocked-state fixpoint, events, journal), not Dolt's commit
 // graph. This backend keeps every invariant in process over an indexed graph,
-// so a create or an edge change touches the affected neighbourhood with a few
+// so a create or an edge change touches the affected neighborhood with a few
 // point reads and one atomic batch write.
 //
 // # Scope of the spike
@@ -62,6 +62,6 @@
 // parent-child edge onto an open, blocked parent whose blockedness is not
 // explained by its own subtree, or a waits-for edge whose spawner still gates
 // it. After every write that can change the answer, the affected
-// neighbourhood (the row, its dependents, and their parent-child descendants)
+// neighborhood (the row, its dependents, and their parent-child descendants)
 // is recomputed to a fixpoint. See blocked.go.
 package pebble
