@@ -70,7 +70,7 @@ func (x *transaction) CloseIssue(ctx context.Context, id string, reason string, 
 }
 
 func (x *transaction) DeleteIssue(ctx context.Context, id string) error {
-	return x.settled(x.t.deleteIssue(id))
+	return x.settled(x.t.deleteIssue(id, ""))
 }
 
 func (x *transaction) GetIssue(ctx context.Context, id string) (*types.Issue, error) {

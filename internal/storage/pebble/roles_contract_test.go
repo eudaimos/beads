@@ -5,10 +5,8 @@ package pebble
 // Regenerate by re-running the wiring script from this package's history after
 // the conformance package gains or renames a runner.
 //
-// Not wired, because they assert the bd_events_journal rows or the
-// issue_versions rows that this store does not keep:
-//   - RunDependencyEditorRemoveIsIdempotent
-//   - RunDependencyEditorSameTypeReAddIsIdempotent
+// Not wired, because they assert the issue_versions rows that this store does
+// not keep:
 //   - RunDependencyEditorSameTypeReAddWithChangedMetadataMintsOneVersion
 //   - RunDependencyEditorSameTypeReAddWithChangedThreadMintsOneVersion
 //   - RunDependencyEditorSameTypeReAddWithIdenticalMetadataIsANoOp
@@ -283,6 +281,8 @@ func TestDependencyEditorContract(t *testing.T) {
 		{"AddedEchoesTheRequestOrder", conformance.RunDependencyEditorAddedEchoesTheRequestOrder},
 		{"RepeatsWithinOneRequestCollapse", conformance.RunDependencyEditorRepeatsWithinOneRequestCollapse},
 		{"AttributesItsEventsToTheActor", conformance.RunDependencyEditorAttributesItsEventsToTheActor},
+		{"SameTypeReAddIsIdempotent", conformance.RunDependencyEditorSameTypeReAddIsIdempotent},
+		{"RemoveIsIdempotent", conformance.RunDependencyEditorRemoveIsIdempotent},
 		{"RetypeRefusalLeavesTheOriginalEdge", conformance.RunDependencyEditorRetypeRefusalLeavesTheOriginalEdge},
 		{"RefusalWritesNothing", conformance.RunDependencyEditorRefusalWritesNothing},
 		{"AppliesParentChildBeforeBlockingEdges", conformance.RunDependencyEditorAppliesParentChildBeforeBlockingEdges},

@@ -151,7 +151,17 @@ func (k roleKit) tableRows(r kv, table string) ([]sqlRow, error) {
 			return true, nil
 		})
 		return rows, err
-	case "bd_events_journal", "issue_versions", "wisp_versions":
+	case "bd_events_journal":
+		err := scanRange(r, journalKey(1), prefixEnd([]byte(nsJournal)), func(_, v []byte) (bool, error) {
+			row, err := decodeJSON[journalRow](v)
+			if err != nil {
+				return false, err
+			}
+			rows = append(rows, sqlRow{"seq": row.Seq, "issue_id": row.IssueID, "op": row.Op, "actor": row.Actor, "ts": row.TS})
+			return true, nil
+		})
+		return rows, err
+	case "issue_versions", "wisp_versions":
 		return nil, nil
 	case "config":
 		err := r.scan([]byte(nsConfig), func(key, value []byte) (bool, error) {

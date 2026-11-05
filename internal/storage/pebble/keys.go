@@ -35,6 +35,7 @@ const (
 	nsBlocked   = "B/"
 	nsDefer     = "F/"
 	nsInternal  = "z/"
+	nsJournal   = "J/"
 )
 
 func issueKey(id string) []byte          { return []byte(nsIssue + id) }
@@ -65,6 +66,9 @@ func repoMtimeKey(path string) []byte { return []byte(nsRepoMtime + path) }
 func seqKey(name string) []byte       { return []byte(nsSeq + name) }
 func leaseKey(id string) []byte       { return []byte(nsLease + id) }
 func internalKey(name string) []byte  { return []byte(nsInternal + name) }
+
+// J/<seq> for every events-journal record (journal.go).
+func journalKey(seq int64) []byte { return []byte(nsJournal + seqString(seq)) }
 
 // Ready-candidate index: R/<status>/<priority>/<created>/<id> for every open,
 // unpinned, not effectively blocked row, so a ready page is a bounded scan in

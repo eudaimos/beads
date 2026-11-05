@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/steveyegge/beads/internal/storage"
+	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/storage/rowid"
 	"github.com/steveyegge/beads/internal/types"
 )
@@ -108,6 +109,11 @@ func (t *txn) addLiveComment(id, author, text string) (*types.Comment, error) {
 	if err := t.recordEvent(rec, types.EventCommented, author, nil, nil, strPtr(text)); err != nil {
 		return nil, err
 	}
+	if err := t.journalComment(id, &storageissueops.EventComment{
+		ID: c.ID, Author: c.Author, Text: c.Text, CreatedAt: c.CreatedAt, Source: storageissueops.CommentSourceStructured,
+	}); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
@@ -130,7 +136,15 @@ func (s *Store) AddComment(ctx context.Context, issueID, actor, comment string) 
 		if err != nil {
 			return err
 		}
-		return t.recordEvent(rec, types.EventCommented, actor, nil, nil, strPtr(comment))
+		ev, err := t.recordEventAt(rec, types.EventCommented, actor, nil, nil, strPtr(comment), nowUTC())
+		if err != nil {
+			return err
+		}
+		// An audit-trail comment is replayable text, journaled with the
+		// structured comment's payload and distinguished by Source.
+		return t.journalComment(issueID, &storageissueops.EventComment{
+			ID: ev.ID, Author: actor, Text: comment, CreatedAt: ev.CreatedAt, Source: storageissueops.CommentSourceAudit,
+		})
 	})
 }
 
@@ -148,8 +162,13 @@ func (s *Store) ImportIssueComment(ctx context.Context, issueID, author, text st
 			}
 		}
 		c, err := t.insertComment(rec, author, text, createdAt)
+		if err != nil {
+			return err
+		}
 		out = c
-		return err
+		return t.journalComment(issueID, &storageissueops.EventComment{
+			ID: c.ID, Author: c.Author, Text: c.Text, CreatedAt: c.CreatedAt, Source: storageissueops.CommentSourceStructured,
+		})
 	})
 	return out, err
 }

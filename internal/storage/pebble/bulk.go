@@ -204,8 +204,14 @@ func (t *txn) deleteIssues(ids []string, cascade, force, dryRun bool) (*types.De
 	if dryRun {
 		return result, nil
 	}
+	// The storage surface's bulk delete carries no actor (the SQL seam's
+	// DeleteIssuesInTx passes ""), and every edge the set touches is journaled
+	// before any row goes.
+	if err := t.journalEdgeRemovalsOf(set.all, ""); err != nil {
+		return nil, err
+	}
 	for _, id := range set.all {
-		if err := t.deleteIssue(id); err != nil {
+		if err := t.deleteIssue(id, ""); err != nil {
 			return nil, fmt.Errorf("delete %s: %w", id, err)
 		}
 	}
@@ -246,8 +252,11 @@ func (s *Store) DeleteIssuesBySourceRepo(ctx context.Context, sourceRepo string)
 		}); err != nil {
 			return fmt.Errorf("query issues: %w", err)
 		}
+		if err := t.journalEdgeRemovalsOf(ids, ""); err != nil {
+			return err
+		}
 		for _, id := range ids {
-			if err := t.deleteIssue(id); err != nil {
+			if err := t.deleteIssue(id, ""); err != nil {
 				return fmt.Errorf("delete %s: %w", id, err)
 			}
 			count++
@@ -301,6 +310,13 @@ func (t *txn) renameIssue(oldID, newID string, issue *types.Issue, actor string)
 		return err
 	} else if taken {
 		return fmt.Errorf("%w: cannot rename %s to %s", storage.ErrAlreadyExists, oldID, newID)
+	}
+
+	// The journal sees a rename as the SQL seam records it: every edge of
+	// the old row removed, the old row deleted, the new row created (keeping
+	// the row's arrival stamp), and every edge added back under the new id.
+	if err := t.journalEdgeRemovalsOf([]string{oldID}, actor); err != nil {
+		return err
 	}
 
 	// The row and its indexes.
@@ -406,6 +422,27 @@ func (t *txn) renameIssue(oldID, newID string, issue *types.Issue, actor string)
 	if err := t.recordEvent(&rec, types.EventType("renamed"), actor, strPtr(oldID), strPtr(newID), nil); err != nil {
 		return err
 	}
+	if err := t.journalDelete(oldID, actor); err != nil {
+		return err
+	}
+	if err := t.journalIssue(storageissueops.EventCreate, newID, actor); err != nil {
+		return err
+	}
+	if t.journal {
+		outs, err := outgoingEdges(w, newID)
+		if err != nil {
+			return err
+		}
+		ins, err := incomingEdges(w, newID)
+		if err != nil {
+			return err
+		}
+		for _, d := range append(outs, ins...) {
+			if err := t.journalDep(storageissueops.EventDepAdd, d, actor); err != nil {
+				return err
+			}
+		}
+	}
 	t.markBlockedDirty(newID)
 	return nil
 }
@@ -487,11 +524,16 @@ func (s *Store) PromoteFromEphemeral(ctx context.Context, id string, actor strin
 		if rec.Issue.StorageClass == types.StorageClassEphemeral {
 			rec.Issue.StorageClass = ""
 		}
+		// The arrival stamp is defined on the wisp plane only (journal.go).
+		rec.Issue.ArrivalSeq = 0
 		rec.Issue.UpdatedAt = nowUTC()
 		rec.ContentHash = rec.Issue.ComputeContentHash()
 		rec.RowVersion++
 		if err := putRecord(t.kv, &old, rec); err != nil {
 			return fmt.Errorf("promote wisp to issues: %w", err)
+		}
+		if err := t.journalIssue(storageissueops.EventUpdate, id, actor); err != nil {
+			return err
 		}
 		t.markBlockedDirty(id)
 		return t.settleBlocked()

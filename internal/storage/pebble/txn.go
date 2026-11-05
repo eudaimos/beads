@@ -10,6 +10,10 @@ type txn struct {
 	kv    kv
 	ctx   context.Context
 
+	// journal is the store's events-journal activation as read when the
+	// transaction began (journal.go).
+	journal bool
+
 	// dirtyBlocked collects the ids whose neighborhood a write in this
 	// transaction may have changed; recomputeBlocked settles them.
 	dirtyBlocked map[string]bool

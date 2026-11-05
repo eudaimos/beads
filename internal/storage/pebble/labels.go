@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 
+	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/types"
 )
 
@@ -34,7 +35,10 @@ func (t *txn) addLabel(issueID, label, actor string) error {
 	}
 	// The SQL backends record the event whether or not the row changed
 	// (the audit's LabelEventNonIdempotent case pins that).
-	return t.recordEvent(rec, types.EventLabelAdded, actor, nil, nil, strPtr("Added label: "+label))
+	if err := t.recordEvent(rec, types.EventLabelAdded, actor, nil, nil, strPtr("Added label: "+label)); err != nil {
+		return err
+	}
+	return t.journalIssue(storageissueops.EventUpdate, issueID, actor)
 }
 
 func (t *txn) removeLabel(issueID, label, actor string) error {
@@ -60,7 +64,10 @@ func (t *txn) removeLabel(issueID, label, actor string) error {
 			return err
 		}
 	}
-	return t.recordEvent(rec, types.EventLabelRemoved, actor, nil, nil, strPtr("Removed label: "+label))
+	if err := t.recordEvent(rec, types.EventLabelRemoved, actor, nil, nil, strPtr("Removed label: "+label)); err != nil {
+		return err
+	}
+	return t.journalIssue(storageissueops.EventUpdate, issueID, actor)
 }
 
 func (s *Store) AddLabel(ctx context.Context, issueID, label, actor string) error {
@@ -181,6 +188,9 @@ func (s *Store) RenameLabel(ctx context.Context, oldLabel, newLabel, actor strin
 				return err
 			}
 			if err := t.recordEvent(rec, types.EventLabelRenamed, actor, strPtr(oldLabel), strPtr(newLabel), nil); err != nil {
+				return err
+			}
+			if err := t.journalIssue(storageissueops.EventUpdate, id, actor); err != nil {
 				return err
 			}
 			ids = append(ids, id)

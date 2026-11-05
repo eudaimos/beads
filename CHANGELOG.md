@@ -32,7 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   roles the CLI reaches are served. Pebble's zstd is built on its pure-Go path
   (`pebblegozstd`, applied in `.bazelrc`, a gazelle override and the Makefile tags)
   because its cgo path bundles the libzstd symbols Dolt's gozstd already bundles.
-  `TestOpWriteLatency` in the package measures the op-journal write shape.
+  The durable events journal is served (`storage.EventsJournalConfigurer`,
+  `EventsJournalAccessor` and the `journalops.Journal` read): every mutation records
+  the op the SQL seam records, in its own batch, with the seq drawn from a counter a
+  prune never touches; a wisp create stamps the row's `arrival_seq`; the package runs
+  the conformance package's eighteen journal cases and the two dependency-editor cases
+  that read journal rows. `TestOpWriteLatency` in the package measures the op-journal
+  write shape.
 
 ### Security
 

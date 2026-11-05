@@ -101,6 +101,12 @@ func (t *txn) addDependency(dep *types.Dependency, actor string, opts storage.De
 			if err := putEdge(t.kv, existing); err != nil {
 				return fmt.Errorf("update dependency metadata: %w", err)
 			}
+			// A refreshed edge is an observable graph mutation: the
+			// replacement edge is journaled for replay (the SQL seam does
+			// the same), though no audit event is written.
+			if err := t.journalDep(storageissueops.EventDepAdd, existing, actor); err != nil {
+				return err
+			}
 		}
 		dep.ID, dep.CreatedAt, dep.CreatedBy, dep.ThreadID = existing.ID, existing.CreatedAt, existing.CreatedBy, existing.ThreadID
 		return nil
@@ -143,6 +149,9 @@ func (t *txn) writeExternalEdge(src *issueRecord, dep *types.Dependency, actor s
 		if err := t.recordEvent(src, types.EventDependencyAdded, actor, nil, strPtr(dep.DependsOnID), strPtr(fmt.Sprintf("Added dependency: %s -> %s (%s)", dep.IssueID, dep.DependsOnID, dep.Type))); err != nil {
 			return err
 		}
+	}
+	if err := t.journalDep(storageissueops.EventDepAdd, dep, actor); err != nil {
+		return err
 	}
 	if dep.Type.AffectsReadyWork() {
 		t.markBlockedDirty(dep.IssueID, dep.DependsOnID)

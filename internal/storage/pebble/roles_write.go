@@ -318,8 +318,11 @@ func (t *txn) deleteForRole(req publicops.DeleteRequest) (publicops.DeleteResult
 	if req.DryRun {
 		return result, nil
 	}
+	if err := t.journalEdgeRemovalsOf(set.all, req.Actor); err != nil {
+		return publicops.DeleteResult{}, err
+	}
 	for _, id := range set.all {
-		if err := t.deleteIssue(id); err != nil {
+		if err := t.deleteIssue(id, req.Actor); err != nil {
 			return publicops.DeleteResult{}, fmt.Errorf("delete %s: %w", id, err)
 		}
 	}

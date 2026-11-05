@@ -273,7 +273,7 @@ func (t *txn) lifecycleUpdate(attempt publicops.UpdateRequest, guardTemplate boo
 		changed = changed || moved
 	}
 	if attempt.Patch.Persistence.Set {
-		moved, err := t.movePersistence(attempt.IssueID, attempt.Patch.Persistence.Value)
+		moved, err := t.movePersistence(attempt.IssueID, attempt.Patch.Persistence.Value, attempt.Actor)
 		if err != nil {
 			return false, err
 		}
@@ -378,7 +378,7 @@ func (t *txn) setParent(id, parent, actor string) (bool, error) {
 // movePersistence moves one row to the persistence mode asked for: the plane
 // and the ephemeral, no-history and storage-class fields follow the mode, and
 // a row already in that state is a no-op.
-func (t *txn) movePersistence(id string, mode types.PersistenceMode) (bool, error) {
+func (t *txn) movePersistence(id string, mode types.PersistenceMode, actor string) (bool, error) {
 	rec, err := getRecord(t.kv, id)
 	if err != nil {
 		return false, err
@@ -403,10 +403,18 @@ func (t *txn) movePersistence(id string, mode types.PersistenceMode) (bool, erro
 	if targetWisp {
 		rec.Plane = planeWisps
 	}
+	if sourceWisp != targetWisp {
+		// A row moved between planes is never stored with a stamp
+		// (PrepareIssueForInsert); the journal's create seam alone writes one.
+		rec.Issue.ArrivalSeq = 0
+	}
 	rec.ContentHash = rec.Issue.ComputeContentHash()
 	rec.RowVersion++
 	if err := putRecord(t.kv, &old, rec); err != nil {
 		return false, fmt.Errorf("move issue persistence: %w", err)
+	}
+	if err := t.journalIssue(storageissueops.EventUpdate, id, actor); err != nil {
+		return false, err
 	}
 	t.markBlockedDirty(id)
 	return true, nil

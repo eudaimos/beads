@@ -122,6 +122,9 @@ func (t *txn) claimIssue(id, actor string) error {
 	if err := t.recordEvent(rec, types.EventClaimed, actor, strPtr(string(oldData)), strPtr(string(newData)), nil); err != nil {
 		return fmt.Errorf("failed to record claim event: %w", err)
 	}
+	if err := t.journalIssue(storageissueops.EventUpdate, id, actor); err != nil {
+		return err
+	}
 	t.markBlockedDirty(id)
 	return nil
 }
@@ -517,6 +520,9 @@ func (t *txn) renewLease(rec *issueRecord, actor string) (error, error) {
 		if err := t.recordEvent(rec, types.EventLeaseRearmed, actor, strPtr(""), strPtr(actor), nil); err != nil {
 			return nil, fmt.Errorf("record lease re-arm event for %s: %w", id, err)
 		}
+		if err := t.journalIssue(storageissueops.EventUpdate, id, actor); err != nil {
+			return nil, err
+		}
 		return nil, nil
 	}
 	return refused(fmt.Errorf("%w: %s status %s", storage.ErrNotClaimable, id, status))
@@ -564,6 +570,9 @@ func (s *Store) ReclaimExpiredLeases(ctx context.Context, olderThan time.Duratio
 			}
 			if err := t.recordEvent(rec, types.EventLeaseReclaimed, actor, strPtr(previous), strPtr(""), nil); err != nil {
 				return fmt.Errorf("record reclaim event for %s: %w", id, err)
+			}
+			if err := t.journalIssue(storageissueops.EventUpdate, id, actor); err != nil {
+				return err
 			}
 			t.markBlockedDirty(id)
 			reclaimed = append(reclaimed, types.ReclaimedLease{ID: id, PreviousOwner: previous, Revision: types.RevisionToken(rec.RowVersion)})

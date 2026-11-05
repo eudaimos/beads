@@ -17,6 +17,7 @@ go_library(
         "events.go",
         "issues.go",
         "iter.go",
+        "journal.go",
         "keys.go",
         "kv.go",
         "labels.go",
@@ -56,6 +57,7 @@ go_library(
         "//internal/workapi/storestats",
         "//internal/workapi/storeworkspaceconfig",
         "//issueops",
+        "//journalops",
         "//memoryops",
         "@com_github_cockroachdb_pebble_v2//:pebble",
         "@com_github_cockroachdb_pebble_v2//vfs",
@@ -66,6 +68,7 @@ go_test(
     name = "pebble_test",
     srcs = [
         "conformance_test.go",
+        "journal_contract_test.go",
         "latency_test.go",
         "readyindex_test.go",
         "rolefixtures_test.go",

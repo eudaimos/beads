@@ -67,6 +67,38 @@ func (b batchKV) iter(lo, hi []byte) (*pebble.Iterator, error) {
 	return b.b.NewIter(&pebble.IterOptions{LowerBound: lo, UpperBound: hi})
 }
 
+// scanRange calls fn for every key in [lo, hi), in key order, until fn
+// returns false or an error.
+func scanRange(r kv, lo, hi []byte, fn func(key, value []byte) (bool, error)) error {
+	it, err := r.iter(lo, hi)
+	if err != nil {
+		return err
+	}
+	return scanIter(it, fn)
+}
+
+// snapKV reads one consistent snapshot of the database; writes are refused.
+type snapKV struct{ snap *pebble.Snapshot }
+
+func (s snapKV) get(key []byte) ([]byte, bool, error) {
+	return pebbleGet(s.snap.Get(key))
+}
+
+func (s snapKV) set([]byte, []byte) error { return errors.New("pebble: write through a read snapshot") }
+func (s snapKV) del([]byte) error         { return errors.New("pebble: delete through a read snapshot") }
+
+func (s snapKV) scan(prefix []byte, fn func(key, value []byte) (bool, error)) error {
+	it, err := s.snap.NewIter(prefixBounds(prefix))
+	if err != nil {
+		return err
+	}
+	return scanIter(it, fn)
+}
+
+func (s snapKV) iter(lo, hi []byte) (*pebble.Iterator, error) {
+	return s.snap.NewIter(&pebble.IterOptions{LowerBound: lo, UpperBound: hi})
+}
+
 // pebbleGet adapts Pebble's (value, closer, err) triple: the value is copied
 // out before the closer releases it, and ErrNotFound becomes (nil, false).
 func pebbleGet(value []byte, closer io.Closer, err error) ([]byte, bool, error) {

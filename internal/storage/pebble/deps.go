@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/steveyegge/beads/internal/storage"
+	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/storage/rowid"
 	"github.com/steveyegge/beads/internal/types"
 )
@@ -209,6 +210,9 @@ func (t *txn) addEdge(dep *types.Dependency, actor string, opts storage.Dependen
 			return err
 		}
 	}
+	if err := t.journalDep(storageissueops.EventDepAdd, dep, actor); err != nil {
+		return err
+	}
 	if dep.Type.AffectsReadyWork() {
 		t.markBlockedDirty(dep.IssueID, dep.DependsOnID)
 	}
@@ -228,6 +232,9 @@ func (t *txn) removeEdge(src, dst, actor string, opts storage.DependencyRemoveOp
 			continue
 		}
 		if err := deleteEdge(t.kv, d.IssueID, d.DependsOnID, string(d.Type)); err != nil {
+			return err
+		}
+		if err := t.journalDep(storageissueops.EventDepRemove, d, actor); err != nil {
 			return err
 		}
 		removed = true

@@ -38,10 +38,13 @@ func nullOf(p *string) sql.NullString {
 // ordinal, never a collision. A wisps-plane row stores "" for absent values,
 // as the wisp_events table does (the audit pins that nullability asymmetry).
 func (t *txn) recordEvent(rec *issueRecord, eventType types.EventType, actor string, oldValue, newValue, comment *string) error {
-	return t.recordEventAt(rec, eventType, actor, oldValue, newValue, comment, nowUTC())
+	_, err := t.recordEventAt(rec, eventType, actor, oldValue, newValue, comment, nowUTC())
+	return err
 }
 
-func (t *txn) recordEventAt(rec *issueRecord, eventType types.EventType, actor string, oldValue, newValue, comment *string, at time.Time) error {
+// recordEventAt is recordEvent at a given stamp; it returns the stored
+// event's id and time.
+func (t *txn) recordEventAt(rec *issueRecord, eventType types.EventType, actor string, oldValue, newValue, comment *string, at time.Time) (*types.Event, error) {
 	at = at.UTC().Truncate(time.Second)
 	table := "events"
 	if rec.Plane == planeWisps {
@@ -71,7 +74,7 @@ func (t *txn) recordEventAt(rec *issueRecord, eventType types.EventType, actor s
 		return true, nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var id string
 	for ordinal := 0; ; ordinal++ {
@@ -82,7 +85,7 @@ func (t *txn) recordEventAt(rec *issueRecord, eventType types.EventType, actor s
 	}
 	seq, err := nextSeq(t.kv, "events")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ev := &types.Event{
 		ID: id, IssueID: rec.Issue.ID, EventType: eventType, Actor: actor,
@@ -90,12 +93,12 @@ func (t *txn) recordEventAt(rec *issueRecord, eventType types.EventType, actor s
 	}
 	data, err := encodeJSON(ev)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := t.kv.set(eventKey(rec.Issue.ID, seq), data); err != nil {
-		return err
+		return nil, err
 	}
-	return t.kv.set(globalEventKey(at.UnixNano(), seq), []byte(rec.Issue.ID+sep+seqString(seq)))
+	return ev, t.kv.set(globalEventKey(at.UnixNano(), seq), []byte(rec.Issue.ID+sep+seqString(seq)))
 }
 
 // eventsOf returns the row's events, newest first (the SQL readers order by

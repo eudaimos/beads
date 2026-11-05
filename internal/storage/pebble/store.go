@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cockroachdb/pebble/v2"
 	"github.com/cockroachdb/pebble/v2/vfs"
@@ -59,8 +60,13 @@ type Store struct {
 	// read-your-writes view and its blocked-state recompute sound.
 	write sync.Mutex
 
+	// journal is the events-journal activation for this instance
+	// (storage.EventsJournalConfigurer); see journal.go.
+	journal atomic.Bool
+
 	closeOnce sync.Once
 	closeErr  error
+	closed    atomic.Bool
 }
 
 var _ storage.DoltStorage = (*Store)(nil)
@@ -102,9 +108,16 @@ func (silentLogger) Fatalf(f string, a ...interface{}) { panic(fmt.Sprintf(f, a.
 
 // Close releases the store. It is idempotent.
 func (s *Store) Close() error {
-	s.closeOnce.Do(func() { s.closeErr = s.db.Close() })
+	s.closeOnce.Do(func() {
+		s.closed.Store(true)
+		s.closeErr = s.db.Close()
+	})
 	return s.closeErr
 }
+
+// IsClosed reports whether Close has been called, the way the SQL stores
+// report it for the callers that sweep closed handles.
+func (s *Store) IsClosed() bool { return s.closed.Load() }
 
 // Dir is the directory the store was opened at ("" in memory).
 func (s *Store) Dir() string { return s.dir }
@@ -120,6 +133,14 @@ func (s *Store) read(fn func(r kv) error) error {
 	return fn(dbKV{db: s.db})
 }
 
+// readSnapshot runs fn against one consistent snapshot of the committed
+// database, for a read whose parts must not straddle a commit.
+func (s *Store) readSnapshot(fn func(r kv) error) error {
+	snap := s.db.NewSnapshot()
+	defer func() { _ = snap.Close() }()
+	return fn(snapKV{snap: snap})
+}
+
 // run executes fn inside a write transaction: an indexed batch under the
 // write mutex, committed with fsync when fn returns nil and discarded
 // otherwise. Nested calls are not supported; a transaction's own methods take
@@ -131,7 +152,7 @@ func (s *Store) run(ctx context.Context, fn func(t *txn) error) error {
 	s.write.Lock()
 	defer s.write.Unlock()
 	b := s.db.NewIndexedBatch()
-	t := &txn{store: s, kv: batchKV{b: b}, ctx: ctx}
+	t := &txn{store: s, kv: batchKV{b: b}, ctx: ctx, journal: s.journal.Load()}
 	if err := fn(t); err != nil {
 		_ = b.Close()
 		return err

@@ -41,6 +41,11 @@ func TestOpWriteLatency(t *testing.T) {
 	if err := s.SetConfig(ctx, "issue_prefix", "lat"); err != nil {
 		t.Fatal(err)
 	}
+	// Gas City runs with the journal on, and the Dolt numbers the gate is
+	// measured against were taken that way (journal_test tag in the
+	// assessment); BEADS_PEBBLE_LATENCY_JOURNAL=0 measures the bare write.
+	journal := os.Getenv("BEADS_PEBBLE_LATENCY_JOURNAL") != "0"
+	s.SetEventsJournalEnabled(journal)
 	// Backdrop: rows open issues, every other row blocking on an earlier one
 	// (about rows/2 edges), created in batches.
 	batch := make([]*types.Issue, 0, 500)
@@ -120,7 +125,7 @@ func TestOpWriteLatency(t *testing.T) {
 		}
 		readyCountsD = append(readyCountsD, time.Since(start))
 	}
-	t.Logf("backdrop: %d rows, %d edges; %d ops; in-memory=%v", rows, rows/2, ops, os.Getenv("BEADS_PEBBLE_LATENCY_MEM") != "")
+	t.Logf("backdrop: %d rows, %d edges; %d ops; in-memory=%v journal=%v", rows, rows/2, ops, os.Getenv("BEADS_PEBBLE_LATENCY_MEM") != "", journal)
 	for _, m := range []struct {
 		name string
 		d    []time.Duration

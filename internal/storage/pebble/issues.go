@@ -93,6 +93,10 @@ func (t *txn) createIssue(issue *types.Issue, actor string, opts storage.BatchCr
 	}
 	if old != nil {
 		rec.Issue.IsBlocked = old.Issue.IsBlocked
+		// The stamp is storage's own (journal.go): an upsert keeps the one
+		// the row carries, and PrepareIssueForInsert dropped any the
+		// caller supplied.
+		rec.Issue.ArrivalSeq = old.Issue.ArrivalSeq
 		rec.RowVersion = old.RowVersion + 1
 		rec.Plane = old.Plane
 	} else {
@@ -113,6 +117,20 @@ func (t *txn) createIssue(issue *types.Issue, actor string, opts storage.BatchCr
 			}
 		}
 	}
+	// The journal records every landed write as a create, an upsert of an
+	// existing row included (the SQL seam's finishCreateIssueInTx), and the
+	// create record hands the row's arrival stamp back onto the caller's
+	// struct.
+	if err := t.journalIssue(storageissueops.EventCreate, issue.ID, actor); err != nil {
+		return false, err
+	}
+	if t.journal {
+		stamped, err := getRecord(t.kv, issue.ID)
+		if err != nil {
+			return false, err
+		}
+		issue.ArrivalSeq = stamped.Issue.ArrivalSeq
+	}
 	for _, c := range issue.Comments {
 		if c == nil {
 			continue
@@ -129,6 +147,12 @@ func (t *txn) createIssue(issue *types.Issue, actor string, opts storage.BatchCr
 			return false, err
 		}
 		c.ID, c.CreatedAt = stored.ID, stored.CreatedAt
+		if err := t.journalComment(issue.ID, &storageissueops.EventComment{
+			ID: stored.ID, Author: stored.Author, Text: stored.Text, CreatedAt: stored.CreatedAt,
+			Source: storageissueops.CommentSourceStructured,
+		}); err != nil {
+			return false, err
+		}
 	}
 	issue.RowVersion = rec.RowVersion
 	issue.Labels = rec.Issue.Labels
@@ -502,6 +526,9 @@ func (t *txn) updateIssue(id string, updates map[string]interface{}, actor strin
 	if err := t.recordEvent(rec, eventType, actor, strPtr(string(oldData)), strPtr(string(newData)), nil); err != nil {
 		return false, err
 	}
+	if err := t.journalIssue(storageissueops.EventUpdate, id, actor); err != nil {
+		return false, err
+	}
 	if _, ok := updates["status"]; ok {
 		t.markBlockedDirty(id)
 	}
@@ -860,6 +887,9 @@ func (t *txn) closeIssue(id, reason, actor, session string, expected *int64) (un
 	if err := t.recordEvent(rec, types.EventClosed, actor, strPtr(""), strPtr(reason), nil); err != nil {
 		return false, err
 	}
+	if err := t.journalIssue(storageissueops.EventClose, id, actor); err != nil {
+		return false, err
+	}
 	t.markBlockedDirty(id)
 	return false, nil
 }
@@ -935,6 +965,9 @@ func (t *txn) reopenIssue(id, reason, actor string) (changed bool, err error) {
 		return false, err
 	}
 	if err := t.recordEvent(rec, types.EventReopened, actor, strPtr(""), strPtr(reason), nil); err != nil {
+		return false, err
+	}
+	if err := t.journalIssue(storageissueops.EventUpdate, id, actor); err != nil {
 		return false, err
 	}
 	if reason != "" {
@@ -1026,6 +1059,9 @@ func (t *txn) unclaim(id, actor string, expectedAssignee *string, force bool) er
 	if err := t.recordEvent(rec, types.EventType("unclaimed"), actor, strPtr(string(oldData)), strPtr(string(newData)), nil); err != nil {
 		return fmt.Errorf("failed to record unclaim event: %w", err)
 	}
+	if err := t.journalIssue(storageissueops.EventUpdate, id, actor); err != nil {
+		return err
+	}
 	t.markBlockedDirty(id)
 	return nil
 }
@@ -1050,9 +1086,17 @@ func (s *Store) UnclaimIssueIfAssignee(ctx context.Context, id string, actor str
 
 // --- delete ----------------------------------------------------------------------
 
-func (t *txn) deleteIssue(id string) error {
+// deleteIssue removes one row with everything it owns. actor is the identity
+// whose request removed it, "" for the system surfaces with no request
+// behind them; the journal's edge-removal and delete records carry it.
+func (t *txn) deleteIssue(id, actor string) error {
 	rec, err := getRecord(t.kv, id)
 	if err != nil {
+		return err
+	}
+	// Edges are journaled before the row goes, while their source snapshots
+	// can still be read.
+	if err := t.journalEdgeRemovalsOf([]string{id}, actor); err != nil {
 		return err
 	}
 	ins, err := incomingEdges(t.kv, id)
@@ -1067,12 +1111,16 @@ func (t *txn) deleteIssue(id string) error {
 	} else if parent != "" {
 		t.markBlockedDirty(parent)
 	}
-	return deleteRecord(t.kv, rec)
+	if err := deleteRecord(t.kv, rec); err != nil {
+		return err
+	}
+	return t.journalDelete(id, actor)
 }
 
 func (s *Store) DeleteIssue(ctx context.Context, id string) error {
 	return s.run(ctx, func(t *txn) error {
-		if err := t.deleteIssue(id); err != nil {
+		// The actorless storage surface: its records carry no actor.
+		if err := t.deleteIssue(id, ""); err != nil {
 			return err
 		}
 		return t.settleBlocked()

@@ -15,8 +15,7 @@ import (
 // Each constructor below builds one role's conformance fixture over a fresh
 // in-memory store, mirroring the Dolt package's newDolt*Fixture helpers.
 // History hooks stay nil (no commit log here); CommitPending is a no-op; the
-// journal and versioned-history switches are no-ops because the store has
-// neither.
+// versioned-history switch is a no-op because the store keeps no versions.
 
 func newReaderFixture(t *testing.T, prefix string) (conformance.ReaderFixture, context.Context) {
 	t.Helper()
@@ -86,7 +85,7 @@ func newDependencyEditorFixture(t *testing.T, prefix string) (conformance.Depend
 		CreateWisp:                 kit.CreateWisp,
 		AddDependency:              kit.AddDependency,
 		QueryScalar:                kit.QueryScalar,
-		SetJournalEnabled:          func(bool) {},
+		SetJournalEnabled:          kit.store.SetEventsJournalEnabled,
 		SetVersionedHistoryEnabled: func(bool) {},
 	}, ctx
 }

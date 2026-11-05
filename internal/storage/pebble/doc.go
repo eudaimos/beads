@@ -20,14 +20,17 @@
 // writes through and the one the latency measurement drives), IssueReader,
 // WorkspaceConfig, StatsReporter, EdgeReader, IssueRelations, IssueClaimer,
 // Releaser, MetadataCAS, Deleter, DependencyEditor and BatchApplier, plus the
-// Counter, CycleDetector and BatchCloser roles bd's own verbs reach, and the
+// Counter, CycleDetector and BatchCloser roles bd's own verbs reach, the
 // commit family as a no-op (vc.go) so bd's auto-commit after each verb has
-// nothing to refuse. The served roles
+// nothing to refuse, and the durable events journal (journal.go: the
+// journalops.Journal read, the operator's prune and activation switch, and
+// the wisp-plane arrival stamp) that gascity's ledger feed and bd events
+// consume. The served roles
 // run the conformance package's role contracts (roles_contract_test.go); the
 // contracts' scalar SQL reads are answered by a test-only responder that
 // projects the key space into the tables they name (rolekit_test.go).
 // Everything else — version control, history, remotes, sync, federation,
-// compaction, the events journal, the roles only bd calls — answers
+// compaction, the roles only bd calls — answers
 // *storage.ErrUnsupported through the generated shell in unsupported_gen.go
 // and is declared through RunUnsupportedContract.
 //
@@ -51,7 +54,8 @@
 //	m/<key>                     metadata
 //	n/<key>                     local metadata (node-local, never synced)
 //	t/<repo_path>               repo mtime record (JSON)
-//	s/<name>                    counters (events, comments, child ids)
+//	s/<name>                    counters (events, comments, child ids, journal)
+//	J/<seq>                     journalRow (JSON): one events-journal record
 //	L/<id>                      lease (JSON): holder, granted, expires, heartbeat
 //	R/<status>/<pri>/<created>/<id>
 //	                            ready candidate (open, unpinned, not effectively

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	storageissueops "github.com/steveyegge/beads/internal/storage/issueops"
 	"github.com/steveyegge/beads/internal/types"
 )
 
@@ -267,6 +268,15 @@ func (t *txn) settleBlocked() error {
 			rec.Issue.IsBlocked = want
 			if err := putRecord(t.kv, &old, rec); err != nil {
 				return err
+			}
+			if want != old.Issue.IsBlocked {
+				// A flipped stored flag is journaled as an update carrying the
+				// settled snapshot, so a replay needs no graph walk of its own
+				// (issueops.recordBlockedJournalChanges); derived maintenance
+				// has no actor.
+				if err := t.journalIssue(storageissueops.EventUpdate, id, ""); err != nil {
+					return err
+				}
 			}
 			changed = true
 		}
