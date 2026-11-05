@@ -257,7 +257,10 @@ func (t *txn) settleBlocked() error {
 			if err != nil {
 				return err
 			}
-			if want == rec.Issue.IsBlocked {
+			// A row whose flag is right but whose effective flag is not
+			// (a stale flag that an edge add has since made real) is
+			// rewritten too, so the ready index follows.
+			if want == rec.Issue.IsBlocked && want == rec.EffectiveBlocked {
 				continue
 			}
 			old := *rec
@@ -295,7 +298,7 @@ func recomputeAll(w kv) (int, error) {
 			if err != nil {
 				return total, err
 			}
-			if want == rec.Issue.IsBlocked {
+			if want == rec.Issue.IsBlocked && want == rec.EffectiveBlocked {
 				continue
 			}
 			old := *rec

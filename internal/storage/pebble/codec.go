@@ -29,6 +29,13 @@ type issueRecord struct {
 	RowVersion  int64       `json:"row_version"`
 	SourceRepo  string      `json:"source_repo,omitempty"`
 	IDPrefix    string      `json:"id_prefix,omitempty"`
+
+	// EffectiveBlocked is the flag the ready predicate honors: is_blocked
+	// on a row that carries a ready-affecting edge of its own. A set flag on
+	// a row without one is stale and does not hide the row (GH#3268,
+	// sqlbuild.OwnReadyAffectingEdgeSQL). putRecord derives it, and the
+	// ready-candidate index is keyed on it.
+	EffectiveBlocked bool `json:"eff_blocked,omitempty"`
 }
 
 func encodeRecord(r *issueRecord) ([]byte, error) {

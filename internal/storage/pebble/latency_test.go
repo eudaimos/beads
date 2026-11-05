@@ -69,7 +69,7 @@ func TestOpWriteLatency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var createD, closeD, edgeAddD, edgeRmD, readyD []time.Duration
+	var createD, closeD, edgeAddD, edgeRmD, readyD, readyCountsD []time.Duration
 	for i := 0; i < ops; i++ {
 		id := fmt.Sprintf("lat-op%05d", i)
 		start := time.Now()
@@ -114,13 +114,19 @@ func TestOpWriteLatency(t *testing.T) {
 			t.Fatalf("ready: %v", err)
 		}
 		readyD = append(readyD, time.Since(start))
+		start = time.Now()
+		if _, _, err := s.GetReadyWorkWithCountsAndTotal(ctx, types.WorkFilter{Limit: 50}); err != nil {
+			t.Fatalf("ready with counts: %v", err)
+		}
+		readyCountsD = append(readyCountsD, time.Since(start))
 	}
 	t.Logf("backdrop: %d rows, %d edges; %d ops; in-memory=%v", rows, rows/2, ops, os.Getenv("BEADS_PEBBLE_LATENCY_MEM") != "")
 	for _, m := range []struct {
 		name string
 		d    []time.Duration
 	}{{"create (Lifecycle, no-history wisp, pinned id)", createD}, {"close (Lifecycle.Update, fenced)", closeD},
-		{"edge add (related)", edgeAddD}, {"edge remove", edgeRmD}, {"ready (limit 50)", readyD}} {
+		{"edge add (related)", edgeAddD}, {"edge remove", edgeRmD}, {"ready (limit 50)", readyD},
+		{"ready with counts and total (limit 50)", readyCountsD}} {
 		t.Logf("%-48s %s", m.name, summarize(m.d))
 	}
 }

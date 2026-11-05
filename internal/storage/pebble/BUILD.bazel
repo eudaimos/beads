@@ -20,6 +20,7 @@ go_library(
         "kv.go",
         "labels.go",
         "ready.go",
+        "readyindex.go",
         "records.go",
         "roles.go",
         "search.go",
@@ -50,11 +51,13 @@ go_library(
         "@com_github_cockroachdb_pebble_v2//vfs",
     ],
 )
+
 go_test(
     name = "pebble_test",
     srcs = [
         "conformance_test.go",
         "latency_test.go",
+        "readyindex_test.go",
     ],
     embed = [":pebble"],
     deps = [
@@ -62,6 +65,7 @@ go_test(
         "//internal/storage",
         "//internal/types",
         "//issueops",
+        "@com_github_cockroachdb_pebble_v2//:pebble",
     ],
 )
 

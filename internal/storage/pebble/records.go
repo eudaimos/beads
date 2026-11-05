@@ -29,9 +29,19 @@ func recordExists(r kv, id string) (bool, error) {
 }
 
 // putRecord writes rec and maintains the secondary indexes against old (nil
-// for a new row).
+// for a new row): external ref, labels, and the derived ready, blocked and
+// defer entries (readyindex.go). It derives rec.EffectiveBlocked first.
 func putRecord(w kv, old, rec *issueRecord) error {
 	rec.Issue.ContentHash = rec.ContentHash
+	eff := false
+	if rec.Issue.IsBlocked {
+		own, err := hasOwnReadyAffectingEdge(w, rec.Issue.ID)
+		if err != nil {
+			return err
+		}
+		eff = own
+	}
+	rec.EffectiveBlocked = eff
 	data, err := encodeRecord(rec)
 	if err != nil {
 		return err
@@ -82,7 +92,24 @@ func putRecord(w kv, old, rec *issueRecord) error {
 			}
 		}
 	}
-	return nil
+	return putDerivedIndexes(w, old, rec)
+}
+
+// dropRowIndexes removes every index entry a row owns: external ref, labels,
+// and the derived entries. The row itself is left to the caller.
+func dropRowIndexes(w kv, rec *issueRecord) error {
+	id := rec.Issue.ID
+	if rec.Issue.ExternalRef != nil && *rec.Issue.ExternalRef != "" {
+		if err := w.del(extRefKey(*rec.Issue.ExternalRef)); err != nil {
+			return err
+		}
+	}
+	for _, l := range rec.Issue.Labels {
+		if err := w.del(labelKey(l, id)); err != nil {
+			return err
+		}
+	}
+	return dropDerivedIndexes(w, rec)
 }
 
 // deleteRecord removes the row and every index entry and child row it owns:
@@ -93,15 +120,8 @@ func deleteRecord(w kv, rec *issueRecord) error {
 	if err := w.del(issueKey(id)); err != nil {
 		return err
 	}
-	if rec.Issue.ExternalRef != nil && *rec.Issue.ExternalRef != "" {
-		if err := w.del(extRefKey(*rec.Issue.ExternalRef)); err != nil {
-			return err
-		}
-	}
-	for _, l := range rec.Issue.Labels {
-		if err := w.del(labelKey(l, id)); err != nil {
-			return err
-		}
+	if err := dropRowIndexes(w, rec); err != nil {
+		return err
 	}
 	for _, prefix := range [][]byte{commentPrefix(id), eventPrefix(id)} {
 		if err := deletePrefix(w, prefix); err != nil {

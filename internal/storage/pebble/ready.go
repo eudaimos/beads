@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -114,16 +115,24 @@ func newReadyMatcher(r kv, filter types.WorkFilter) (*readyMatcher, error) {
 }
 
 // childrenOfDeferredParents is issueops.getChildrenOfDeferredParentsInTx:
-// the parent-child children of every row whose defer_until is still ahead.
+// the parent-child children of every row whose defer_until is still ahead,
+// read from the F index (defer_until strictly after now).
 func childrenOfDeferredParents(r kv, now time.Time) (map[string]bool, error) {
 	var parents []string
-	err := scanRecords(r, func(rec *issueRecord) (bool, error) {
-		if rec.Issue.DeferUntil != nil && rec.Issue.DeferUntil.After(now) {
-			parents = append(parents, rec.Issue.ID)
-		}
-		return true, nil
-	})
+	it, err := r.iter(deferFrom(unixNanos(now)+1), prefixEnd([]byte(nsDefer)))
 	if err != nil {
+		return nil, err
+	}
+	for ok := it.First(); ok; ok = it.Next() {
+		if parts := splitKey(nsDefer, it.Key()); len(parts) == 2 {
+			parents = append(parents, parts[1])
+		}
+	}
+	if err := it.Error(); err != nil {
+		_ = it.Close()
+		return nil, err
+	}
+	if err := it.Close(); err != nil {
 		return nil, err
 	}
 	if len(parents) == 0 {
@@ -186,17 +195,152 @@ func hasOwnReadyAffectingEdge(r kv, id string) (bool, error) {
 	return found, err
 }
 
-// match evaluates the ready predicate for one row, clause by clause in the
-// order sqlbuild.BuildReadyWorkWhere renders them.
+// statusSet lists the statuses the filter admits, in a fixed order; the
+// index path scans one partition per status.
+func (m *readyMatcher) statusSet() []types.Status {
+	f := &m.filter
+	switch {
+	case f.Status == types.StatusOpen:
+		out := []types.Status{types.StatusOpen}
+		customs := make([]string, 0, len(m.activeCustom))
+		for name := range m.activeCustom {
+			customs = append(customs, name)
+		}
+		sort.Strings(customs)
+		for _, name := range customs {
+			if types.Status(name) != types.StatusOpen {
+				out = append(out, types.Status(name))
+			}
+		}
+		return out
+	case f.Status != "":
+		return []types.Status{f.Status}
+	case len(f.Statuses) > 0:
+		var out []types.Status
+		for _, st := range f.Statuses {
+			if !containsStatus(out, st) {
+				out = append(out, st)
+			}
+		}
+		return out
+	default:
+		return []types.Status{types.StatusOpen, types.StatusInProgress}
+	}
+}
+
+// indexable reports whether every admitted status is one the R index
+// holds; a filter that asks for closed or pinned rows takes the full scan.
+func (m *readyMatcher) indexable() bool {
+	for _, st := range m.statusSet() {
+		if !open(st) {
+			return false
+		}
+	}
+	return true
+}
+
+// needsRow reports whether the filter has clauses the index entry cannot
+// answer, so the row must be loaded before it is admitted.
+func (m *readyMatcher) needsRow() bool {
+	f := &m.filter
+	return len(m.labels) > 0 || len(m.labelsAny) > 0 || len(f.ExcludeLabels) > 0 ||
+		m.labelGlob != nil || m.labelRegex != nil || f.HasMetadataKey != "" || len(m.metaKeys) > 0
+}
+
+// matchIndexed evaluates the filter-dependent clauses of the ready
+// predicate for one candidate, clause by clause in the order
+// sqlbuild.BuildReadyWorkWhere renders them. The status, pinned and
+// effectively-blocked clauses are the index's own membership rule. The row
+// is loaded only for the clauses that need it.
+func (m *readyMatcher) matchIndexed(e *readyEntry) (bool, error) {
+	f := &m.filter
+	// The custom-status widening joins the custom_statuses table, which the
+	// SQL path renders for the issues table only; the wisps leg projects the
+	// pin as an exact status (readyWorkWispIssueFilter).
+	if f.Status == types.StatusOpen && e.status != types.StatusOpen && e.plane != planeIssues {
+		return false, nil
+	}
+	if !f.IncludeEphemeral && e.ephemeral {
+		return false, nil
+	}
+	if f.Priority != nil && e.priority != *f.Priority {
+		return false, nil
+	}
+	if f.Type != "" {
+		if e.typ != types.IssueType(f.Type) {
+			return false, nil
+		}
+	} else if m.excludeTypes[e.typ] {
+		return false, nil
+	}
+	if f.Unassigned {
+		if e.assignee != "" {
+			return false, nil
+		}
+	} else if f.Assignee != nil && e.assignee != *f.Assignee {
+		return false, nil
+	}
+	if !f.IncludeDeferred {
+		if e.deferAt > unixNanos(m.now) {
+			return false, nil
+		}
+		if m.deferredChildren[e.id] {
+			return false, nil
+		}
+	}
+	if m.excludeIDs[e.id] {
+		return false, nil
+	}
+	if m.needsRow() {
+		if e.rec == nil {
+			rec, err := getRecord(m.r, e.id)
+			if err != nil {
+				return false, err
+			}
+			e.rec = rec
+		}
+		i := &e.rec.Issue
+		if !labelSetMatches(i.Labels, m.labels, m.labelsAny, f.ExcludeLabels) {
+			return false, nil
+		}
+		if m.labelGlob != nil && !anyLabelMatches(i.Labels, m.labelGlob) {
+			return false, nil
+		}
+		if m.labelRegex != nil && !anyLabelMatches(i.Labels, m.labelRegex) {
+			return false, nil
+		}
+		if !metadataMatches(i.Metadata, f.HasMetadataKey, m.metaKeys, f.MetadataFields) {
+			return false, nil
+		}
+	}
+	if f.ParentID != nil && !m.descendants[e.id] {
+		// The dotted-id arm admits a legacy hierarchical child that carries
+		// no parent-child edge (sqlbuild.readyParentClause).
+		if !strings.HasPrefix(e.id, *f.ParentID+".") {
+			return false, nil
+		}
+		parented, err := hasAnyParentEdge(m.r, e.id)
+		if err != nil || parented {
+			return false, err
+		}
+	}
+	if f.MoleculeID != "" {
+		ok, err := childOrDottedDescendant(m.r, e.id, f.MoleculeID)
+		if err != nil || !ok {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+// match evaluates the whole ready predicate for one row (the full-scan
+// path).
 func (m *readyMatcher) match(rec *issueRecord) (bool, error) {
 	i := &rec.Issue
 	f := &m.filter
 
 	switch {
 	case f.Status == types.StatusOpen:
-		// The custom-status widening joins the custom_statuses table, which
-		// the SQL path renders for the issues table only; the wisps leg
-		// projects the pin as an exact status (readyWorkWispIssueFilter).
 		if i.Status != types.StatusOpen && !(rec.Plane == planeIssues && m.activeCustom[string(i.Status)]) {
 			return false, nil
 		}
@@ -222,90 +366,62 @@ func (m *readyMatcher) match(rec *issueRecord) (bool, error) {
 			return false, err
 		}
 	}
-	if !f.IncludeEphemeral && i.Ephemeral {
-		return false, nil
-	}
-	if f.Priority != nil && i.Priority != *f.Priority {
-		return false, nil
-	}
-	if f.Type != "" {
-		if i.IssueType != types.IssueType(f.Type) {
-			return false, nil
-		}
-	} else if m.excludeTypes[i.IssueType] {
-		return false, nil
-	}
-	if f.Unassigned {
-		if i.Assignee != "" {
-			return false, nil
-		}
-	} else if f.Assignee != nil && i.Assignee != *f.Assignee {
-		return false, nil
-	}
-	if !f.IncludeDeferred {
-		if i.DeferUntil != nil && i.DeferUntil.After(m.now) {
-			return false, nil
-		}
-		if m.deferredChildren[i.ID] {
-			return false, nil
-		}
-	}
-	if m.excludeIDs[i.ID] {
-		return false, nil
-	}
-	if !labelSetMatches(i.Labels, m.labels, m.labelsAny, f.ExcludeLabels) {
-		return false, nil
-	}
-	if m.labelGlob != nil && !anyLabelMatches(i.Labels, m.labelGlob) {
-		return false, nil
-	}
-	if m.labelRegex != nil && !anyLabelMatches(i.Labels, m.labelRegex) {
-		return false, nil
-	}
-	if f.ParentID != nil && !m.descendants[i.ID] {
-		// The dotted-id arm admits a legacy hierarchical child that carries
-		// no parent-child edge (sqlbuild.readyParentClause).
-		if !strings.HasPrefix(i.ID, *f.ParentID+".") {
-			return false, nil
-		}
-		parented, err := hasAnyParentEdge(m.r, i.ID)
-		if err != nil || parented {
-			return false, err
-		}
-	}
-	if f.MoleculeID != "" {
-		ok, err := childOrDottedDescendant(m.r, i.ID, f.MoleculeID)
-		if err != nil || !ok {
-			return false, err
-		}
-	}
-	if !metadataMatches(i.Metadata, f.HasMetadataKey, m.metaKeys, f.MetadataFields) {
-		return false, nil
-	}
-	return true, nil
+	return m.matchIndexed(entryFromRecord(rec))
 }
 
-// readyRecords returns every ready row, in id order.
-func readyRecords(r kv, filter types.WorkFilter) ([]*issueRecord, error) {
+// readyPageFor evaluates filter: the first limit ready rows in filter's sort
+// order (every row when limit is 0, none when it is negative), with the size
+// of the whole ready set when wantTotal. Filters the R index can serve read
+// it; the rest scan.
+func readyPageFor(r kv, filter types.WorkFilter, limit int, wantTotal bool) (readyPage, error) {
 	m, err := newReadyMatcher(r, filter)
 	if err != nil {
-		return nil, fmt.Errorf("get ready work: %w", err)
+		return readyPage{}, fmt.Errorf("get ready work: %w", err)
 	}
-	var out []*issueRecord
-	err = scanRecords(r, func(rec *issueRecord) (bool, error) {
+	var page readyPage
+	if m.indexable() {
+		page, err = readyScanIndexed(r, m, limit, wantTotal)
+	} else {
+		page, err = readyScanFull(r, m, limit)
+	}
+	if err != nil {
+		return readyPage{}, fmt.Errorf("get ready work: %w", err)
+	}
+	return page, nil
+}
+
+// readyScanFull is the unindexed path: every row, sorted in process, then cut.
+func readyScanFull(r kv, m *readyMatcher, limit int) (readyPage, error) {
+	var page readyPage
+	err := scanRecords(r, func(rec *issueRecord) (bool, error) {
 		ok, err := m.match(rec)
 		if err != nil {
 			return false, err
 		}
 		if ok {
-			out = append(out, rec)
+			page.recs = append(page.recs, rec)
 		}
 		return true, nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("get ready work: %w", err)
+		return page, err
 	}
-	return out, nil
+	less := readyLess(m.filter.SortPolicy, m.now)
+	stableSortBy(page.recs, func(a, b *issueRecord) bool { return less(&a.Issue, &b.Issue) })
+	page.total = len(page.recs)
+	switch {
+	case limit < 0:
+		page.recs = nil
+	case limit > 0 && len(page.recs) > limit:
+		page.recs = page.recs[:limit]
+	}
+	return page, nil
+}
+
+// pageLimit is the number of rows a page must hold for boundReady to trim
+// and cap it as the SQL path does: the EffectiveSearchLimit, or everything.
+func pageLimit(filter types.WorkFilter) int {
+	return storageissueops.EffectiveSearchLimit(filter.Limit, filter.MaxRows)
 }
 
 // readyLess is issueops.sortReadyIssues as a comparator: the hybrid policy
@@ -364,12 +480,12 @@ func boundReady[T any](items []T, filter types.WorkFilter) ([]T, error) {
 
 // readyWork is the GetReadyWork body over r.
 func readyWork(r kv, filter types.WorkFilter) ([]*types.Issue, error) {
-	recs, err := readyRecords(r, filter)
+	page, err := readyPageFor(r, filter, pageLimit(filter), false)
 	if err != nil {
 		return nil, err
 	}
-	issues := make([]*types.Issue, 0, len(recs))
-	for _, rec := range recs {
+	issues := make([]*types.Issue, 0, len(page.recs))
+	for _, rec := range page.recs {
 		issue := rec.toIssue()
 		if err := projectLease(r, issue); err != nil {
 			return nil, fmt.Errorf("get ready work: lease %s: %w", issue.ID, err)
@@ -457,13 +573,13 @@ func sortIssuesWithCounts(items []*types.IssueWithCounts, less func(a, b *types.
 // ready page hydrated with counts, plus the size of the whole ready set the
 // page was cut from.
 func readyWorkWithCounts(r kv, filter types.WorkFilter) ([]*types.IssueWithCounts, int, error) {
-	recs, err := readyRecords(r, filter)
+	page, err := readyPageFor(r, filter, pageLimit(filter), true)
 	if err != nil {
 		return nil, 0, err
 	}
 	hyd := countsHydration{lite: filter.Lite}
-	items := make([]*types.IssueWithCounts, 0, len(recs))
-	for _, rec := range recs {
+	items := make([]*types.IssueWithCounts, 0, len(page.recs))
+	for _, rec := range page.recs {
 		iwc, err := withCounts(r, rec, hyd)
 		if err != nil {
 			return nil, 0, fmt.Errorf("get ready work with counts: %s: %w", rec.Issue.ID, err)
@@ -471,7 +587,7 @@ func readyWorkWithCounts(r kv, filter types.WorkFilter) ([]*types.IssueWithCount
 		items = append(items, iwc)
 	}
 	sortIssuesWithCounts(items, readyLess(filter.SortPolicy, nowUTC()))
-	total := len(items)
+	total := page.total
 	items, err = boundReady(items, filter)
 	if err != nil {
 		return nil, 0, err
@@ -487,7 +603,14 @@ func readyWorkWithCounts(r kv, filter types.WorkFilter) ([]*types.IssueWithCount
 // (inherited blocking); a flagged row with neither is left out.
 func blockedIssues(r kv, filter types.WorkFilter) ([]*types.BlockedIssue, error) {
 	var results []*types.BlockedIssue
-	err := scanRecords(r, func(rec *issueRecord) (bool, error) {
+	err := r.scan([]byte(nsBlocked), func(k, _ []byte) (bool, error) {
+		rec, err := getRecord(r, strings.TrimPrefix(string(k), nsBlocked))
+		if err != nil {
+			if isNotFound(err) {
+				return true, nil
+			}
+			return false, err
+		}
 		i := &rec.Issue
 		if !i.IsBlocked || !open(i.Status) {
 			return true, nil
@@ -601,8 +724,8 @@ func (s *Store) GetReadyWorkWithCountsAndTotal(ctx context.Context, filter types
 func (s *Store) CountReadyWork(ctx context.Context, filter types.WorkFilter) (int, error) {
 	var n int
 	err := s.read(func(r kv) error {
-		recs, err := readyRecords(r, filter)
-		n = len(recs)
+		page, err := readyPageFor(r, filter, -1, true)
+		n = page.total
 		return err
 	})
 	return n, err

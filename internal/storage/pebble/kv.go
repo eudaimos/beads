@@ -18,6 +18,9 @@ type kv interface {
 	// fn returns false or an error. The key and value slices are only valid
 	// for the duration of the call.
 	scan(prefix []byte, fn func(key, value []byte) (bool, error)) error
+	// iter returns a positioned-by-the-caller iterator over [lo, hi); a nil
+	// hi means no upper bound. The caller closes it.
+	iter(lo, hi []byte) (*pebble.Iterator, error)
 }
 
 // dbKV reads and writes the database directly (autocommit, synced).
@@ -38,6 +41,10 @@ func (d dbKV) scan(prefix []byte, fn func(key, value []byte) (bool, error)) erro
 	return scanIter(it, fn)
 }
 
+func (d dbKV) iter(lo, hi []byte) (*pebble.Iterator, error) {
+	return d.db.NewIter(&pebble.IterOptions{LowerBound: lo, UpperBound: hi})
+}
+
 // batchKV reads and writes an indexed batch: a transaction's working set.
 type batchKV struct{ b *pebble.Batch }
 
@@ -54,6 +61,10 @@ func (b batchKV) scan(prefix []byte, fn func(key, value []byte) (bool, error)) e
 		return err
 	}
 	return scanIter(it, fn)
+}
+
+func (b batchKV) iter(lo, hi []byte) (*pebble.Iterator, error) {
+	return b.b.NewIter(&pebble.IterOptions{LowerBound: lo, UpperBound: hi})
 }
 
 // pebbleGet adapts Pebble's (value, closer, err) triple: the value is copied
@@ -92,14 +103,5 @@ func scanIter(it *pebble.Iterator, fn func(key, value []byte) (bool, error)) (er
 // prefixBounds returns the iterator bounds covering every key that starts
 // with prefix: [prefix, prefix+1) in byte order.
 func prefixBounds(prefix []byte) *pebble.IterOptions {
-	upper := make([]byte, len(prefix))
-	copy(upper, prefix)
-	for i := len(upper) - 1; i >= 0; i-- {
-		if upper[i] < 0xff {
-			upper[i]++
-			upper = upper[:i+1]
-			return &pebble.IterOptions{LowerBound: prefix, UpperBound: upper}
-		}
-	}
-	return &pebble.IterOptions{LowerBound: prefix}
+	return &pebble.IterOptions{LowerBound: prefix, UpperBound: prefixEnd(prefix)}
 }

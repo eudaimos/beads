@@ -15,8 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   process over the affected neighborhood, and the Lifecycle role. It passes the portable
   conformance suite (`backend/conformance.RunAll`) and declares version control, history,
   remotes, sync, federation, compaction and the other roles unsupported through the
-  generated shell. `bd` does not provision it yet; it is opened by name through the
-  registry. `TestOpWriteLatency` in the package measures the op-journal write shape.
+  generated shell. Ready work, its counts and the blocked list read derived indexes
+  (a ready-candidate key in sort order, a blocked set, a defer set) that the record
+  writer maintains and that are rebuilt on open, so a ready page is bounded by the page
+  rather than the store. `bd` does not provision it yet; it is opened by name through
+  the registry. `TestOpWriteLatency` in the package measures the op-journal write shape.
 
 ### Security
 

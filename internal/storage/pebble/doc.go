@@ -46,6 +46,19 @@
 //	t/<repo_path>               repo mtime record (JSON)
 //	s/<name>                    counters (events, comments, child ids)
 //	L/<id>                      lease (JSON): holder, granted, expires, heartbeat
+//	R/<status>/<pri>/<created>/<id>
+//	                            ready candidate (open, unpinned, not effectively
+//	                            blocked); value: plane, type, ephemeral,
+//	                            defer_until, assignee. A ready page is a merge
+//	                            of the (status, priority) groups the filter
+//	                            admits, read only as far as the page needs.
+//	B/<id>                      "" (open rows whose blocked flag is set)
+//	F/<defer_until>/<id>        "" (rows with a defer_until)
+//	z/<name>                    store-internal markers (index version)
+//
+// The derived indexes (R, B, F) are maintained by putRecord from the row's
+// previous and new state and rebuilt on open when the store predates them;
+// see readyindex.go.
 //
 // # Concurrency and transactions
 //

@@ -318,15 +318,8 @@ func (t *txn) renameIssue(oldID, newID string, issue *types.Issue, actor string)
 	if err := w.del(issueKey(oldID)); err != nil {
 		return err
 	}
-	if old.Issue.ExternalRef != nil && *old.Issue.ExternalRef != "" {
-		if err := w.del(extRefKey(*old.Issue.ExternalRef)); err != nil {
-			return err
-		}
-	}
-	for _, l := range old.Issue.Labels {
-		if err := w.del(labelKey(l, oldID)); err != nil {
-			return err
-		}
+	if err := dropRowIndexes(w, old); err != nil {
+		return err
 	}
 	if err := putRecord(w, nil, &rec); err != nil {
 		return fmt.Errorf("update issue ID: %w", err)

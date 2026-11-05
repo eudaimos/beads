@@ -65,13 +65,18 @@ func OpenInMemory(ctx context.Context) (*Store, error) {
 	return openWith(ctx, "", &pebble.Options{FS: vfs.NewMem()})
 }
 
-func openWith(_ context.Context, dir string, opts *pebble.Options) (*Store, error) {
+func openWith(ctx context.Context, dir string, opts *pebble.Options) (*Store, error) {
 	opts.Logger = silentLogger{}
 	db, err := pebble.Open(dir, opts)
 	if err != nil {
 		return nil, fmt.Errorf("pebble: open %s: %w", dir, err)
 	}
-	return &Store{db: db, dir: dir}, nil
+	s := &Store{db: db, dir: dir}
+	if err := s.ensureIndexes(ctx); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("pebble: open %s: %w", dir, err)
+	}
+	return s, nil
 }
 
 // silentLogger keeps Pebble's own event log out of test output.
