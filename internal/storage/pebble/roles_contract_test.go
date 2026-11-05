@@ -656,3 +656,160 @@ func TestBatchCreatorContract(t *testing.T) {
 		})
 	}
 }
+
+func TestQuerierContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.QuerierFixture)
+	}{
+		{"DisjunctionAnswersEveryMatch", conformance.RunQuerierDisjunctionAnswersEveryMatch},
+		{"PageIsAPrefixAndHasMoreIsExact", conformance.RunQuerierPageIsAPrefixAndHasMoreIsExact},
+		{"SortBoundsThePageInOrder", conformance.RunQuerierSortBoundsThePageInOrder},
+		{"SortByTitleFoldsCaseBeforeItCutsThePage", conformance.RunQuerierSortByTitleFoldsCaseBeforeItCutsThePage},
+		{"SortByClosedPutsTheUnclosedRowsAtTheFarEnd", conformance.RunQuerierSortByClosedPutsTheUnclosedRowsAtTheFarEnd},
+		{"SortTieBreaksByIDInBothDirections", conformance.RunQuerierSortTieBreaksByIDInBothDirections},
+		{"SortSeesTheWholeMatchingSet", conformance.RunQuerierSortSeesTheWholeMatchingSet},
+		{"HidesClosedUnlessTheExpressionOrTheFlagSaysOtherwise", conformance.RunQuerierHidesClosedUnlessTheExpressionOrTheFlagSaysOtherwise},
+		{"RefusesAMalformedRequest", conformance.RunQuerierRefusesAMalformedRequest},
+		{"OffsetSkipsMatches", conformance.RunQuerierOffsetSkipsMatches},
+		{"EmptyMatchIsAWellFormedPage", conformance.RunQuerierEmptyMatchIsAWellFormedPage},
+		{"WritesNothing", conformance.RunQuerierWritesNothing},
+		{"DoesNotMutateTheCallerRequest", conformance.RunQuerierDoesNotMutateTheCallerRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newQuerierFixture(t, "qry")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}
+
+func TestReadyCounterContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.ReadyCounterFixture)
+	}{
+		{"EqualsTheUnboundedPage", conformance.RunReadyCounterEqualsTheUnboundedPage},
+		{"RejectsLimitAndOffset", conformance.RunReadyCounterRejectsLimitAndOffset},
+		{"CountsTheBlockerAwareSet", conformance.RunReadyCounterCountsTheBlockerAwareSet},
+		{"EphemeralGateMatchesTheListing", conformance.RunReadyCounterEphemeralGateMatchesTheListing},
+		{"EmptyFrontIsZeroAndNil", conformance.RunReadyCounterEmptyFrontIsZeroAndNil},
+		{"WritesNothing", conformance.RunReadyCounterWritesNothing},
+		{"DoesNotMutateTheCallerRequest", conformance.RunReadyCounterDoesNotMutateTheCallerRequest},
+		{"CountsOnlyTheOpenRowsItsListingLists", conformance.RunReadyCounterCountsOnlyTheOpenRowsItsListingLists},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newReadyCounterFixture(t, "rdc")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}
+
+func TestVersionReconcilerContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.VersionReconcilerFixture)
+	}{
+		{"RecordsAWorkspaceWithNoMarkers", conformance.RunVersionReconcilerRecordsAWorkspaceWithNoMarkers},
+		{"AdvancesBothMarkersOnAnUpgrade", conformance.RunVersionReconcilerAdvancesBothMarkersOnAnUpgrade},
+		{"TreatsTheSameVersionAsANoOp", conformance.RunVersionReconcilerTreatsTheSameVersionAsANoOp},
+		{"RefusesADowngradeWithoutAnError", conformance.RunVersionReconcilerRefusesADowngradeWithoutAnError},
+		{"RefusesAVersionBelowTheHighWaterMark", conformance.RunVersionReconcilerRefusesAVersionBelowTheHighWaterMark},
+		{"CatchesUpToTheHighWaterMark", conformance.RunVersionReconcilerCatchesUpToTheHighWaterMark},
+		{"RefusesAnEmptyVersion", conformance.RunVersionReconcilerRefusesAnEmptyVersion},
+		{"LeavesTheMarkersStandingWhenItCannotComplete", conformance.RunVersionReconcilerLeavesTheMarkersStandingWhenItCannotComplete},
+		{"RecordsNoHistory", conformance.RunVersionReconcilerRecordsNoHistory},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newVersionReconcilerFixture(t, "vrc")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}
+
+func TestHeartbeaterContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.HeartbeaterFixture)
+	}{
+		{"RefreshesTheHoldersLease", conformance.RunHeartbeaterRefreshesTheHoldersLease},
+		{"ASameSecondHeartbeatIsNotARearm", conformance.RunHeartbeaterASameSecondHeartbeatIsNotARearm},
+		{"ChangesNothingOnTheRow", conformance.RunHeartbeaterChangesNothingOnTheRow},
+		{"AGuardedWriteWithThePreHeartbeatRevisionStillWins", conformance.RunHeartbeaterAGuardedWriteWithThePreHeartbeatRevisionStillWins},
+		{"RefusesAForeignHolder", conformance.RunHeartbeaterRefusesAForeignHolder},
+		{"CommitsOnlyItsOwnTables", conformance.RunHeartbeaterCommitsOnlyItsOwnTables},
+		{"RefusesAnOrphanedLeaseOnAReleasedIssue", conformance.RunHeartbeaterRefusesAnOrphanedLeaseOnAReleasedIssue},
+		{"RefusesAnOrphanedLeaseOnAClosedIssue", conformance.RunHeartbeaterRefusesAnOrphanedLeaseOnAClosedIssue},
+		{"RefusesAnOrphanedLeaseOnAnIssueSomeoneElseHolds", conformance.RunHeartbeaterRefusesAnOrphanedLeaseOnAnIssueSomeoneElseHolds},
+		{"RefusesAfterClose", conformance.RunHeartbeaterRefusesAfterClose},
+		{"RefusesAfterRelease", conformance.RunHeartbeaterRefusesAfterRelease},
+		{"RefusesAfterReclaim", conformance.RunHeartbeaterRefusesAfterReclaim},
+		{"RefusesAfterStatusMovedOffInProgress", conformance.RunHeartbeaterRefusesAfterStatusMovedOffInProgress},
+		{"RefusesAWisp", conformance.RunHeartbeaterRefusesAWisp},
+		{"RearmsAHandDoledClaim", conformance.RunHeartbeaterRearmsAHandDoledClaim},
+		{"AnswersNotFoundForAnAbsentID", conformance.RunHeartbeaterAnswersNotFoundForAnAbsentID},
+		{"RefusesABlankOrOverLongActor", conformance.RunHeartbeaterRefusesABlankOrOverLongActor},
+		{"DoesNotMutateTheRequest", conformance.RunHeartbeaterDoesNotMutateTheRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newHeartbeaterFixture(t, "hbt")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}
+
+func TestLeaseReclaimerContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.LeaseReclaimerFixture)
+	}{
+		{"RevertsAStaleLease", conformance.RunLeaseReclaimerRevertsAStaleLease},
+		{"MintsARevisionThatFencesTheFormerHolder", conformance.RunLeaseReclaimerMintsARevisionThatFencesTheFormerHolder},
+		{"LeavesALiveLeaseAlone", conformance.RunLeaseReclaimerLeavesALiveLeaseAlone},
+		{"HonorsTheGraceWindow", conformance.RunLeaseReclaimerHonorsTheGraceWindow},
+		{"ScopesToTheNamedIDs", conformance.RunLeaseReclaimerScopesToTheNamedIDs},
+		{"AnswersAnAbsentIDWithAnEmptyResult", conformance.RunLeaseReclaimerAnswersAnAbsentIDWithAnEmptyResult},
+		{"ScopesToAssigneesAndLabels", conformance.RunLeaseReclaimerScopesToAssigneesAndLabels},
+		{"AttributesTheRecoveryEvent", conformance.RunLeaseReclaimerAttributesTheRecoveryEvent},
+		{"FiresOnUpdateOncePerReclaimedRow", conformance.RunLeaseReclaimerFiresOnUpdateOncePerReclaimedRow},
+		{"RefusesAMalformedRequest", conformance.RunLeaseReclaimerRefusesAMalformedRequest},
+		{"RefusesABlankScopeEntry", conformance.RunLeaseReclaimerRefusesABlankScopeEntry},
+		{"AcceptsExactlyTheCap", conformance.RunLeaseReclaimerAcceptsExactlyTheCap},
+		{"DoesNotMutateTheCallerRequest", conformance.RunLeaseReclaimerDoesNotMutateTheCallerRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newLeaseReclaimerFixture(t, "lrc")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}
+
+func TestReadyClaimerContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.ReadyClaimerFixture)
+	}{
+		{"RejectsLimitOffsetBriefAndEmptyActor", conformance.RunReadyClaimerRejectsLimitOffsetBriefAndEmptyActor},
+		{"EmptyFrontIsNormal", conformance.RunReadyClaimerEmptyFrontIsNormal},
+		{"ClaimsTheFrontRowAndReturnsThePostClaimState", conformance.RunReadyClaimerClaimsTheFrontRowAndReturnsThePostClaimState},
+		{"ClaimsAnEphemeralRowTheFilterAdmits", conformance.RunReadyClaimerClaimsAnEphemeralRowTheFilterAdmits},
+		{"LeavesEphemeralRowsOutOfTheDefaultReadySet", conformance.RunReadyClaimerLeavesEphemeralRowsOutOfTheDefaultReadySet},
+		{"LeasesADurableWinButNotAnEphemeralOne", conformance.RunReadyClaimerLeasesADurableWinButNotAnEphemeralOne},
+		{"AnswersTheQuestionReaderReadyLists", conformance.RunReadyClaimerAnswersTheQuestionReaderReadyLists},
+		{"SkipsIneligibleFrontRows", conformance.RunReadyClaimerSkipsIneligibleFrontRows},
+		{"RecordsOneHistoryEntryForAWin", conformance.RunReadyClaimerRecordsOneHistoryEntryForAWin},
+		{"DoesNotMutateTheCallerRequest", conformance.RunReadyClaimerDoesNotMutateTheCallerRequest},
+		{"FencesTheClaimByEveryLabelSetAndTheParentItWasGiven", conformance.RunReadyClaimerFencesTheClaimByEveryLabelSetAndTheParentItWasGiven},
+		{"HydratesOnlyItsBlocksEdgesIntoTheCardinalities", conformance.RunReadyClaimerHydratesOnlyItsBlocksEdgesIntoTheCardinalities},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newReadyClaimerFixture(t, "rcl")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}

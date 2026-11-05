@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/steveyegge/beads/backend/conformance"
+	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/types"
+	"github.com/steveyegge/beads/internal/workapi"
 	publicops "github.com/steveyegge/beads/issueops"
 )
 
@@ -219,6 +221,8 @@ var servedRoles = map[string]bool{
 	"DependencyEditor": true, "Deleter": true, "WorkspaceConfig": true, "StatsReporter": true,
 	"Releaser": true, "MetadataCAS": true, "IssueRelations": true, "IssueClaimer": true,
 	"Counter": true, "CycleDetector": true, "BatchCloser": true, "Commenter": true, "BatchCreator": true,
+	"Querier": true, "ReadyCounter": true, "VersionReconciler": true,
+	"Heartbeater": true, "LeaseReclaimer": true, "ReadyClaimer": true,
 	// The commit family is answered as a no-op (vc.go), not refused.
 	"Commit": true, "CommitWithConfig": true, "CommitMergeResolution": true, "CommitConfigOnly": true,
 	"CommitConfigUserKVOnly": true, "CommitAll": true, "CommitPending": true,
@@ -247,6 +251,12 @@ func TestServedRolesAreWired(t *testing.T) {
 		"BatchCloser":            func() error { _, err := s.BatchCloser(); return err },
 		"Commenter":              func() error { _, err := s.Commenter(); return err },
 		"BatchCreator":           func() error { _, err := s.BatchCreator(); return err },
+		"Querier":                func() error { _, err := s.Querier(); return err },
+		"ReadyCounter":           func() error { _, err := s.ReadyCounter(); return err },
+		"VersionReconciler":      func() error { _, err := s.VersionReconciler(); return err },
+		"Heartbeater":            func() error { _, err := s.Heartbeater(); return err },
+		"LeaseReclaimer":         func() error { _, err := s.LeaseReclaimer(); return err },
+		"ReadyClaimer":           func() error { _, err := s.ReadyClaimer(); return err },
 		"Commit":                 func() error { return s.Commit(ctx, "probe") },
 		"CommitWithConfig":       func() error { return s.CommitWithConfig(ctx, "probe") },
 		"CommitMergeResolution":  func() error { return s.CommitMergeResolution(ctx, "probe") },
@@ -428,6 +438,175 @@ func newBatchCreatorFixture(t *testing.T, prefix string) (conformance.BatchCreat
 		QueryScalar:  kit.QueryScalar,
 		SetConfig:    kit.SetConfig,
 		// CountHistory stays nil: the store keeps no commit log.
+	}, ctx
+}
+
+func newQuerierFixture(t *testing.T, prefix string) (conformance.QuerierFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	querier, err := kit.store.Querier()
+	if err != nil {
+		t.Fatalf("Querier(): %v", err)
+	}
+	return conformance.QuerierFixture{
+		IssuePrefix: kit.IssuePrefix,
+		Querier:     querier,
+		CreateIssue: kit.CreateIssue,
+	}, ctx
+}
+
+func newReadyCounterFixture(t *testing.T, prefix string) (conformance.ReadyCounterFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	counter, err := kit.store.ReadyCounter()
+	if err != nil {
+		t.Fatalf("ReadyCounter(): %v", err)
+	}
+	reader, err := kit.store.IssueReader()
+	if err != nil {
+		t.Fatalf("IssueReader(): %v", err)
+	}
+	return conformance.ReadyCounterFixture{
+		IssuePrefix:   kit.IssuePrefix,
+		ReadyCounter:  counter,
+		Reader:        reader,
+		CreateIssue:   kit.CreateIssue,
+		CreateWisp:    kit.CreateWisp,
+		AddDependency: kit.AddDependency,
+		QueryScalar:   kit.QueryScalar,
+	}, ctx
+}
+
+func newVersionReconcilerFixture(t *testing.T, prefix string) (conformance.VersionReconcilerFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	reconciler, err := kit.store.VersionReconciler()
+	if err != nil {
+		t.Fatalf("VersionReconciler(): %v", err)
+	}
+	return conformance.VersionReconcilerFixture{
+		Reconciler: reconciler,
+		RecordMarkers: func(ctx context.Context, recorded, highWaterMark string) error {
+			if err := kit.store.SetLocalMetadata(ctx, workapi.MetadataKeyVersion, recorded); err != nil {
+				return err
+			}
+			return kit.store.SetLocalMetadata(ctx, workapi.MetadataKeyVersionMax, highWaterMark)
+		},
+	}, ctx
+}
+
+// hookedRoles wraps the store in the hook-firing decorator a command holds,
+// with the on_update log the lease contracts read back.
+func hookedRoles(t *testing.T, s *Store) (*storage.HookFiringStore, func(context.Context) ([]string, error)) {
+	t.Helper()
+	runner, fired := conformance.NewUpdateHookLog(t)
+	if runner == nil {
+		return nil, nil
+	}
+	return storage.NewHookFiringStore(s, runner), fired
+}
+
+func newHeartbeaterFixture(t *testing.T, prefix string) (conformance.HeartbeaterFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	s := kit.store
+	heartbeater, err := s.Heartbeater()
+	if err != nil {
+		t.Fatalf("Heartbeater(): %v", err)
+	}
+	claimer, err := s.IssueClaimer()
+	if err != nil {
+		t.Fatalf("IssueClaimer(): %v", err)
+	}
+	lifecycle, err := s.IssueLifecycle()
+	if err != nil {
+		t.Fatalf("IssueLifecycle(): %v", err)
+	}
+	releaser, err := s.Releaser()
+	if err != nil {
+		t.Fatalf("Releaser(): %v", err)
+	}
+	reclaimer, err := s.LeaseReclaimer()
+	if err != nil {
+		t.Fatalf("LeaseReclaimer(): %v", err)
+	}
+	fixture := conformance.HeartbeaterFixture{
+		IssuePrefix:       kit.IssuePrefix,
+		Heartbeater:       heartbeater,
+		CreateIssue:       kit.CreateIssue,
+		CreateWisp:        kit.CreateWisp,
+		Claimer:           claimer,
+		Lifecycle:         lifecycle,
+		Releaser:          releaser,
+		LeaseReclaimer:    reclaimer,
+		Exec:              kit.exec,
+		QueryScalar:       kit.QueryScalar,
+		SetJournalEnabled: s.SetEventsJournalEnabled,
+		// SetVersionedHistoryEnabled and CountHistory stay nil: the store
+		// keeps neither issue versions nor a commit log.
+	}
+	if hooked, fired := hookedRoles(t, s); hooked != nil {
+		if fixture.HookedHeartbeater, err = hooked.Heartbeater(); err != nil {
+			t.Fatalf("hooked Heartbeater(): %v", err)
+		}
+		fixture.FiredUpdates = fired
+	}
+	return fixture, ctx
+}
+
+func newLeaseReclaimerFixture(t *testing.T, prefix string) (conformance.LeaseReclaimerFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	s := kit.store
+	reclaimer, err := s.LeaseReclaimer()
+	if err != nil {
+		t.Fatalf("LeaseReclaimer(): %v", err)
+	}
+	claimer, err := s.IssueClaimer()
+	if err != nil {
+		t.Fatalf("IssueClaimer(): %v", err)
+	}
+	lifecycle, err := s.IssueLifecycle()
+	if err != nil {
+		t.Fatalf("IssueLifecycle(): %v", err)
+	}
+	fixture := conformance.LeaseReclaimerFixture{
+		IssuePrefix:    kit.IssuePrefix,
+		LeaseReclaimer: reclaimer,
+		CreateIssue:    kit.CreateIssue,
+		Claimer:        claimer,
+		Lifecycle:      lifecycle,
+		Exec:           kit.exec,
+		QueryScalar:    kit.QueryScalar,
+	}
+	if hooked, fired := hookedRoles(t, s); hooked != nil {
+		if fixture.HookedLeaseReclaimer, err = hooked.LeaseReclaimer(); err != nil {
+			t.Fatalf("hooked LeaseReclaimer(): %v", err)
+		}
+		fixture.FiredUpdates = fired
+	}
+	return fixture, ctx
+}
+
+func newReadyClaimerFixture(t *testing.T, prefix string) (conformance.ReadyClaimerFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	claimer, err := kit.store.ReadyClaimer()
+	if err != nil {
+		t.Fatalf("ReadyClaimer(): %v", err)
+	}
+	reader, err := kit.store.IssueReader()
+	if err != nil {
+		t.Fatalf("IssueReader(): %v", err)
+	}
+	return conformance.ReadyClaimerFixture{
+		IssuePrefix:   kit.IssuePrefix,
+		Claimer:       claimer,
+		Reader:        reader,
+		CreateIssue:   kit.CreateIssue,
+		CreateWisp:    kit.CreateWisp,
+		AddDependency: kit.AddDependency,
+		QueryScalar:   kit.QueryScalar,
 	}, ctx
 }
 

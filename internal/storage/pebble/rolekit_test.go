@@ -72,6 +72,113 @@ func newRoleKit(t *testing.T, prefix string) (roleKit, context.Context) {
 	return kit, ctx
 }
 
+var (
+	execUpdateLeaseRe = regexp.MustCompile(`(?i)^UPDATE leases SET (.+) WHERE issue_id = \?$`)
+	execDeleteLeaseRe = regexp.MustCompile(`(?i)^DELETE FROM leases WHERE issue_id = \?$`)
+	execInsertLeaseRe = regexp.MustCompile(`(?i)^INSERT INTO leases \(issue_id, holder, granted_at, lease_expires_at, heartbeat_at, granted_node\) VALUES \(\?, \?, \?, \?, \?, ''\)$`)
+	execInsertLabelRe = regexp.MustCompile(`(?i)^INSERT INTO labels \(issue_id, label\) VALUES \(\?, \?\)$`)
+)
+
+// exec answers the handful of raw write statements the lease contracts use
+// to manufacture a state the roles cannot produce (an aged or orphaned lease
+// row, a label planted past the roles), the way queryScalar answers their
+// reads: by the statement's shape, against the key space.
+func (k roleKit) exec(ctx context.Context, statements []conformance.SQLStatement) error {
+	for _, stmt := range statements {
+		query := strings.Join(strings.Fields(stmt.Query), " ")
+		if err := k.store.run(ctx, func(t *txn) error {
+			return k.execOne(t, query, stmt.Args)
+		}); err != nil {
+			return fmt.Errorf("%s: %w", stmt.Query, err)
+		}
+	}
+	return nil
+}
+
+func (k roleKit) execOne(t *txn, query string, args []any) error {
+	asTime := func(v any) (time.Time, error) {
+		switch x := v.(type) {
+		case time.Time:
+			return x.UTC(), nil
+		case string:
+			return time.ParseInLocation(sqlTimeLayout, x, time.UTC)
+		}
+		return time.Time{}, fmt.Errorf("role fixture: %v is not a time", v)
+	}
+	switch {
+	case execUpdateLeaseRe.MatchString(query):
+		assignments := splitTop(execUpdateLeaseRe.FindStringSubmatch(query)[1], ',')
+		if len(args) != len(assignments)+1 {
+			return fmt.Errorf("role fixture: %d args for %d assignments", len(args), len(assignments))
+		}
+		id, ok := args[len(args)-1].(string)
+		if !ok {
+			return fmt.Errorf("role fixture: lease issue_id %v is not a string", args[len(args)-1])
+		}
+		l, err := getLease(t.kv, id)
+		if err != nil {
+			return err
+		}
+		if l == nil {
+			return nil
+		}
+		for i, assignment := range assignments {
+			col := strings.TrimSpace(strings.SplitN(assignment, "=", 2)[0])
+			switch col {
+			case "lease_expires_at":
+				if l.ExpiresAt, err = asTime(args[i]); err != nil {
+					return err
+				}
+			case "heartbeat_at":
+				if l.HeartbeatAt, err = asTime(args[i]); err != nil {
+					return err
+				}
+			case "granted_at":
+				if l.GrantedAt, err = asTime(args[i]); err != nil {
+					return err
+				}
+			case "holder":
+				l.Holder = stringify(args[i])
+			case "granted_node":
+				l.Node = stringify(args[i])
+			default:
+				return fmt.Errorf("role fixture: no lease column %q", col)
+			}
+		}
+		return putLease(t.kv, id, l)
+	case execDeleteLeaseRe.MatchString(query):
+		return t.kv.del(leaseKey(stringify(args[0])))
+	case execInsertLeaseRe.MatchString(query):
+		if len(args) != 5 {
+			return fmt.Errorf("role fixture: lease insert wants 5 args, got %d", len(args))
+		}
+		granted, err := asTime(args[2])
+		if err != nil {
+			return err
+		}
+		expires, err := asTime(args[3])
+		if err != nil {
+			return err
+		}
+		beat, err := asTime(args[4])
+		if err != nil {
+			return err
+		}
+		return putLease(t.kv, stringify(args[0]), &lease{
+			Holder: stringify(args[1]), GrantedAt: granted, ExpiresAt: expires, HeartbeatAt: beat,
+		})
+	case execInsertLabelRe.MatchString(query):
+		rec, err := getRecord(t.kv, stringify(args[0]))
+		if err != nil {
+			return err
+		}
+		old := *rec
+		rec.Issue.Labels = dedupeSorted(append(append([]string(nil), rec.Issue.Labels...), stringify(args[1])))
+		return putRecord(t.kv, &old, rec)
+	}
+	return fmt.Errorf("role fixture: unsupported statement %q", query)
+}
+
 // sqlRow is one projected table row: column name to value, nil for NULL.
 type sqlRow map[string]any
 
@@ -226,7 +333,7 @@ func (k roleKit) tableRows(r kv, table string) ([]sqlRow, error) {
 			rows = append(rows, sqlRow{
 				"issue_id": strings.TrimPrefix(string(key), nsLease), "holder": l.Holder,
 				"granted_at": l.GrantedAt, "lease_expires_at": l.ExpiresAt, "heartbeat_at": l.HeartbeatAt,
-				"node": l.Node,
+				"node": l.Node, "granted_node": l.Node,
 			})
 			return true, nil
 		})
@@ -238,7 +345,7 @@ func (k roleKit) tableRows(r kv, table string) ([]sqlRow, error) {
 func issueRow(rec *issueRecord) sqlRow {
 	i := &rec.Issue
 	return sqlRow{
-		"id": i.ID, "row_lock": rec.RowVersion, "status": string(i.Status), "assignee": i.Assignee,
+		"id": i.ID, "row_lock": rec.RowVersion, "current_revision": rec.RowVersion, "status": string(i.Status), "assignee": i.Assignee,
 		"issue_type": string(i.IssueType), "title": i.Title, "description": i.Description, "notes": i.Notes,
 		"design": i.Design, "acceptance_criteria": i.AcceptanceCriteria, "created_by": i.CreatedBy,
 		"owner": i.Owner, "spec_id": i.SpecID, "close_reason": i.CloseReason, "closed_by_session": i.ClosedBySession,
@@ -323,6 +430,11 @@ var (
 	eqRe         = regexp.MustCompile(`(?s)^(.+?)\s*(=|<>|!=)\s*(\?|'(?:[^']|'')*'|-?\d+)$`)
 	joinRe       = regexp.MustCompile(`(?i)^FROM (\w+) (\w+) JOIN (\w+) (\w+) ON (\w+)\.(\w+) = (\w+)\.(\w+)$`)
 	likeRe       = regexp.MustCompile(`(?is)^(.+?)\s+LIKE\s+(\?|'(?:[^']|'')*')$`)
+	// A comparison against a bound argument: col > ?, col <= ?.
+	cmpArgRe = regexp.MustCompile(`(?s)^(.+?)\s*(>=|<=|>|<)\s*\?$`)
+	// BETWEEN's own AND is rewritten to ~AND~ before the top-level AND split.
+	betweenRe     = regexp.MustCompile(`(?i)BETWEEN\s+(\?|'[^']*')\s+AND\s+(\?|'[^']*')`)
+	betweenPredRe = regexp.MustCompile(`(?is)^(.+?)\s+BETWEEN\s+(\?|'[^']*')\s+~AND~\s+(\?|'[^']*')$`)
 )
 
 // queryScalar answers the contracts' scalar reads over the projected tables:
@@ -332,6 +444,7 @@ var (
 // or `expr IS [NOT] NULL`. It scans the first matching row like database/sql.
 func (k roleKit) queryScalar(ctx context.Context, query string, args []any, dest ...any) error {
 	query = strings.Join(strings.Fields(query), " ")
+	query = betweenRe.ReplaceAllString(query, "BETWEEN $1 ~AND~ $2")
 	query, order, limit, offset, err := splitOrderLimit(query)
 	if err != nil {
 		return err
@@ -437,6 +550,33 @@ func (k roleKit) queryScalar(ctx context.Context, query string, args []any, dest
 	if limit >= 0 && limit < len(matched) {
 		matched = matched[:limit]
 	}
+	if col, fallback, ok := maxAggregate(exprs); ok {
+		if len(dest) != 1 {
+			return fmt.Errorf("role fixture: MAX into %d dests", len(dest))
+		}
+		var best any
+		for _, row := range matched {
+			v := row[col]
+			if v == nil {
+				continue
+			}
+			if best == nil {
+				best = v
+				continue
+			}
+			cmp, err := compareValues(v, best)
+			if err != nil {
+				return err
+			}
+			if cmp > 0 {
+				best = v
+			}
+		}
+		if best == nil {
+			best = fallback
+		}
+		return assignScalar(dest[0], best)
+	}
 	if len(exprs) == 1 && strings.EqualFold(strings.TrimSpace(exprs[0]), "COUNT(*)") {
 		if len(dest) != 1 {
 			return fmt.Errorf("role fixture: COUNT(*) into %d dests", len(dest))
@@ -459,6 +599,34 @@ func (k roleKit) queryScalar(ctx context.Context, query string, args []any, dest
 		}
 	}
 	return nil
+}
+
+// maxAggregate recognizes MAX(col) and COALESCE(MAX(col), n), answering the
+// column and the value an empty match yields (nil without a COALESCE).
+func maxAggregate(exprs []string) (string, any, bool) {
+	if len(exprs) != 1 {
+		return "", nil, false
+	}
+	expr := strings.TrimSpace(exprs[0])
+	upper := strings.ToUpper(expr)
+	var fallback any
+	if strings.HasPrefix(upper, "COALESCE(") && strings.HasSuffix(expr, ")") {
+		args := splitTop(expr[len("COALESCE("):len(expr)-1], ',')
+		if len(args) != 2 {
+			return "", nil, false
+		}
+		expr = strings.TrimSpace(args[0])
+		upper = strings.ToUpper(expr)
+		if n, err := strconv.ParseInt(strings.TrimSpace(args[1]), 10, 64); err == nil {
+			fallback = n
+		} else {
+			fallback = literal(args[1])
+		}
+	}
+	if !strings.HasPrefix(upper, "MAX(") || !strings.HasSuffix(expr, ")") {
+		return "", nil, false
+	}
+	return strings.Trim(strings.TrimSpace(expr[len("MAX("):len(expr)-1]), "`"), fallback, true
 }
 
 // orderTerm is one ORDER BY column.
@@ -594,6 +762,38 @@ func compilePredicate(pred string, nextArg func() (any, error)) (func(sqlRow) (b
 			return v != nil && re.MatchString(stringify(v)), nil
 		}, nil
 	}
+	if m := betweenPredRe.FindStringSubmatch(pred); m != nil {
+		expr := m[1]
+		bound := func(token string) (any, error) {
+			if token == "?" {
+				return nextArg()
+			}
+			return literal(token), nil
+		}
+		lo, err := bound(m[2])
+		if err != nil {
+			return nil, err
+		}
+		hi, err := bound(m[3])
+		if err != nil {
+			return nil, err
+		}
+		return func(row sqlRow) (bool, error) {
+			v, err := evalExpr(expr, row)
+			if err != nil || v == nil {
+				return false, err
+			}
+			below, err := compareValues(v, lo)
+			if err != nil {
+				return false, err
+			}
+			above, err := compareValues(v, hi)
+			if err != nil {
+				return false, err
+			}
+			return below >= 0 && above <= 0, nil
+		}, nil
+	}
 	if m := isNullRe.FindStringSubmatch(pred); m != nil {
 		expr, not := m[1], strings.TrimSpace(m[2]) != ""
 		return func(row sqlRow) (bool, error) {
@@ -652,6 +852,32 @@ func compilePredicate(pred string, nextArg func() (any, error)) (func(sqlRow) (b
 			return valuesEqual(v, want) != negate, nil
 		}, nil
 	}
+	if m := cmpArgRe.FindStringSubmatch(pred); m != nil {
+		expr, op := m[1], m[2]
+		want, err := nextArg()
+		if err != nil {
+			return nil, err
+		}
+		return func(row sqlRow) (bool, error) {
+			v, err := evalExpr(expr, row)
+			if err != nil || v == nil {
+				return false, err
+			}
+			cmp, err := compareValues(v, want)
+			if err != nil {
+				return false, err
+			}
+			switch op {
+			case ">=":
+				return cmp >= 0, nil
+			case "<=":
+				return cmp <= 0, nil
+			case ">":
+				return cmp > 0, nil
+			}
+			return cmp < 0, nil
+		}, nil
+	}
 	return nil, fmt.Errorf("role fixture: unsupported predicate %q", pred)
 }
 
@@ -703,6 +929,20 @@ func evalExpr(expr string, row sqlRow) (any, error) {
 			}
 		}
 		return nil, nil
+	case strings.HasPrefix(upper, "CONCAT(") && strings.HasSuffix(expr, ")"):
+		var out strings.Builder
+		for _, arg := range splitTop(expr[len("CONCAT("):len(expr)-1], ',') {
+			v, err := evalExpr(arg, row)
+			if err != nil {
+				return nil, err
+			}
+			if v == nil {
+				// MySQL CONCAT is NULL when any argument is.
+				return nil, nil
+			}
+			out.WriteString(stringify(v))
+		}
+		return out.String(), nil
 	case strings.HasPrefix(upper, "CONCAT_WS(") && strings.HasSuffix(expr, ")"):
 		args := splitTop(expr[len("CONCAT_WS("):len(expr)-1], ',')
 		if len(args) == 0 {

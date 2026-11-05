@@ -34,7 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through the lifecycle create (an edge may name an earlier item of the batch, the
   cross-plane rule is checked before anything is written, and the explicit ids a batch
   names are claimed up front so a minted id cannot collide with one), with the
-  conformance package's Commenter and BatchCreator contracts wired. Pebble's zstd is built on its pure-Go path
+  conformance package's Commenter and BatchCreator contracts wired. The `Querier`,
+  `ReadyCounter` and `VersionReconciler` roles are served through the shared store
+  bodies, and the lease family (`Heartbeater`, `LeaseReclaimer`, `ReadyClaimer`) over
+  the store's own claim, renewal and reclaim bodies, with all six contracts wired; lease
+  stamps are now whole seconds, as the SQL lease columns hold them, and a metadata
+  read on a canceled context reports the cancellation. The storage tree's contract-leg
+  registry holds the pebble leg to the role tier under an adoption ceiling that falls
+  as roles land. Pebble's zstd is built on its pure-Go path
   (`pebblegozstd`, applied in `.bazelrc`, a gazelle override and the Makefile tags)
   because its cgo path bundles the libzstd symbols Dolt's gozstd already bundles.
   The durable events journal is served (`storage.EventsJournalConfigurer`,

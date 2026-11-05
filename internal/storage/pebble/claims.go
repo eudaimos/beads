@@ -132,6 +132,9 @@ func (t *txn) claimIssue(id, actor string) error {
 // grantLease mirrors issueops.UpsertLeaseInTx: a fresh lease for holder with
 // the context's TTL, stamped with this node's identity.
 func grantLease(ctx context.Context, w kv, id, holder string, now time.Time) error {
+	// The lease columns are DATETIME(0) on the SQL backends; the stamps are
+	// kept at the same precision so a heartbeat reports the stored value.
+	now = now.UTC().Truncate(time.Second)
 	l := &lease{
 		Holder:      holder,
 		GrantedAt:   now,
@@ -432,7 +435,7 @@ func isDirectChild(r kv, id, parentID string) (bool, error) {
 // refusal that read the row commits the orphan-lease cleanup it may carry and
 // is returned as a *issueops.LeaseRenewalRefusal.
 func (s *Store) HeartbeatIssue(ctx context.Context, id, actor string) error {
-	var refusal error
+	var refusal *storageissueops.LeaseRenewalRefusal
 	err := s.run(ctx, func(t *txn) error {
 		rec, err := getRecord(t.kv, id)
 		if err != nil {
@@ -447,27 +450,43 @@ func (s *Store) HeartbeatIssue(ctx context.Context, id, actor string) error {
 		if rec.Plane == planeWisps {
 			return fmt.Errorf("%w: %s is ephemeral", storage.ErrNotClaimable, id)
 		}
-		refusal, err = t.renewLease(rec, actor)
+		_, refusal, err = t.renewLease(rec, actor)
 		return err
 	})
 	if err != nil {
 		return err
 	}
-	return refusal
+	if refusal != nil {
+		return refusal
+	}
+	return nil
 }
 
-// renewLease is the body of HeartbeatIssue for a durable row. It returns a
-// refusal to be reported after commit (the orphan delete it may carry is
-// kept), or an error that discards the transaction.
-func (t *txn) renewLease(rec *issueRecord, actor string) (error, error) {
+// leaseRenewal reports what a renewal wrote: the stored stamps, and whether
+// it granted a fresh lease (a re-arm) rather than refreshing the caller's.
+type leaseRenewal struct {
+	HeartbeatAt time.Time
+	ExpiresAt   time.Time
+	Rearmed     bool
+}
+
+// renewLease is the body of HeartbeatIssue and the Heartbeater role for a
+// durable row. It returns the renewal it wrote, or a refusal to be reported
+// after commit (the orphan delete it may carry is kept), or an error that
+// discards the transaction.
+func (t *txn) renewLease(rec *issueRecord, actor string) (leaseRenewal, *storageissueops.LeaseRenewalRefusal, error) {
 	id := rec.Issue.ID
-	now := nowUTC()
+	// Lease stamps are whole seconds (the SQL columns are DATETIME(0)); the
+	// row's own updated_at keeps the store's precision.
+	wall := nowUTC()
+	now := wall.Truncate(time.Second)
 	ttl := storageissueops.LeaseTTL(t.ctx)
 	node := storageissueops.NodeID(t.ctx)
 	l, err := getLease(t.kv, id)
 	if err != nil {
-		return nil, fmt.Errorf("read lease for %s: %w", id, err)
+		return leaseRenewal{}, nil, fmt.Errorf("read lease for %s: %w", id, err)
 	}
+	refreshed := leaseRenewal{HeartbeatAt: now, ExpiresAt: now.Add(ttl)}
 	live := rec.Issue.Status == types.StatusInProgress && rec.Issue.Assignee == actor
 	if l != nil && l.Holder == actor && live {
 		// Fast path: the caller's own row on a live claim.
@@ -475,20 +494,20 @@ func (t *txn) renewLease(rec *issueRecord, actor string) (error, error) {
 		if l.Node == "" {
 			l.Node = node
 		}
-		return nil, putLease(t.kv, id, l)
+		return refreshed, nil, putLease(t.kv, id, l)
 	}
 	assignee, status := rec.Issue.Assignee, string(rec.Issue.Status)
-	refused := func(reason error) (error, error) {
+	refused := func(reason error) (leaseRenewal, *storageissueops.LeaseRenewalRefusal, error) {
 		refusal := &storageissueops.LeaseRenewalRefusal{IssueID: id, Found: true, Assignee: assignee, Status: status, Err: reason}
 		if l != nil && storageissueops.ActorMatches(l.Holder, actor) {
 			// The caller's own lease on a claim it no longer holds is an
 			// orphan; drop it rather than keep it alive.
 			if err := t.kv.del(leaseKey(id)); err != nil {
-				return nil, fmt.Errorf("delete orphaned lease for %s: %w", id, err)
+				return leaseRenewal{}, nil, fmt.Errorf("delete orphaned lease for %s: %w", id, err)
 			}
 			refusal.OrphanDeleted = true
 		}
-		return refusal, nil
+		return leaseRenewal{}, refusal, nil
 	}
 	if assignee != "" && !storageissueops.ActorMatches(assignee, actor) {
 		return refused(fmt.Errorf("%w by %s", storage.ErrAlreadyClaimed, assignee))
@@ -503,27 +522,28 @@ func (t *txn) renewLease(rec *issueRecord, actor string) (error, error) {
 			if l.Node == "" {
 				l.Node = node
 			}
-			return nil, putLease(t.kv, id, l)
+			return refreshed, nil, putLease(t.kv, id, l)
 		}
 		// Re-arm: a live claim with no lease (hand-doled through a generic
 		// update). This is a mutation: the row's version moves and the
 		// re-arm is recorded.
 		old := *rec
-		rec.Issue.UpdatedAt = now
+		rec.Issue.UpdatedAt = wall
 		rec.RowVersion++
 		if err := putRecord(t.kv, &old, rec); err != nil {
-			return nil, fmt.Errorf("remint row version for %s: %w", id, err)
+			return leaseRenewal{}, nil, fmt.Errorf("remint row version for %s: %w", id, err)
 		}
 		if err := grantLease(t.ctx, t.kv, id, actor, now); err != nil {
-			return nil, err
+			return leaseRenewal{}, nil, err
 		}
 		if err := t.recordEvent(rec, types.EventLeaseRearmed, actor, strPtr(""), strPtr(actor), nil); err != nil {
-			return nil, fmt.Errorf("record lease re-arm event for %s: %w", id, err)
+			return leaseRenewal{}, nil, fmt.Errorf("record lease re-arm event for %s: %w", id, err)
 		}
 		if err := t.journalIssue(storageissueops.EventUpdate, id, actor); err != nil {
-			return nil, err
+			return leaseRenewal{}, nil, err
 		}
-		return nil, nil
+		refreshed.Rearmed = true
+		return refreshed, nil, nil
 	}
 	return refused(fmt.Errorf("%w: %s status %s", storage.ErrNotClaimable, id, status))
 }

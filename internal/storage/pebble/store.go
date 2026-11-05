@@ -133,6 +133,16 @@ func (s *Store) read(fn func(r kv) error) error {
 	return fn(dbKV{db: s.db})
 }
 
+// readCtx is read for a caller whose context may already be done: a
+// canceled read reports the cancellation instead of answering as if nothing
+// were wrong, the way the SQL backends' drivers do.
+func (s *Store) readCtx(ctx context.Context, fn func(r kv) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.read(fn)
+}
+
 // readSnapshot runs fn against one consistent snapshot of the committed
 // database, for a read whose parts must not straddle a commit.
 func (s *Store) readSnapshot(fn func(r kv) error) error {

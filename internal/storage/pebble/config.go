@@ -83,7 +83,7 @@ func syncProjection(w kv, key, value string) error {
 
 func (s *Store) GetConfig(ctx context.Context, key string) (string, error) {
 	var out string
-	err := s.read(func(r kv) error {
+	err := s.readCtx(ctx, func(r kv) error {
 		v, _, err := getString(r, configKey(key))
 		out = v
 		return err
@@ -98,7 +98,7 @@ func getConfig(r kv, key string) (string, error) {
 
 func (s *Store) GetAllConfig(ctx context.Context) (map[string]string, error) {
 	out := map[string]string{}
-	err := s.read(func(r kv) error {
+	err := s.readCtx(ctx, func(r kv) error {
 		return r.scan([]byte(nsConfig), func(k, v []byte) (bool, error) {
 			out[strings.TrimPrefix(string(k), nsConfig)] = string(v)
 			return true, nil
@@ -119,7 +119,7 @@ func (s *Store) SetMetadata(ctx context.Context, key, value string) error {
 
 func (s *Store) GetMetadata(ctx context.Context, key string) (string, error) {
 	var out string
-	err := s.read(func(r kv) error {
+	err := s.readCtx(ctx, func(r kv) error {
 		v, _, err := getString(r, metadataKey(key))
 		out = v
 		return err
@@ -133,7 +133,7 @@ func (s *Store) SetLocalMetadata(ctx context.Context, key, value string) error {
 
 func (s *Store) GetLocalMetadata(ctx context.Context, key string) (string, error) {
 	var out string
-	err := s.read(func(r kv) error {
+	err := s.readCtx(ctx, func(r kv) error {
 		v, _, err := getString(r, localMetaKey(key))
 		out = v
 		return err
