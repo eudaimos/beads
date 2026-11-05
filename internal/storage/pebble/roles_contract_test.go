@@ -599,3 +599,60 @@ func TestCycleDetectorContract(t *testing.T) {
 		})
 	}
 }
+
+func TestCommenterContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.CommenterFixture)
+	}{
+		{"StoresTextVerbatim", conformance.RunCommenterStoresTextVerbatim},
+		{"ResultMirrorsTheStoredRow", conformance.RunCommenterResultMirrorsTheStoredRow},
+		{"AdvancesALiveStampPastTheThreadsNewestComment", conformance.RunCommenterAdvancesALiveStampPastTheThreadsNewestComment},
+		{"TakesTheClockWhenTheThreadIsBehindIt", conformance.RunCommenterTakesTheClockWhenTheThreadIsBehindIt},
+		{"CommentOnAWispLandsOnTheWispThread", conformance.RunCommenterCommentOnAWispLandsOnTheWispThread},
+		{"RefusesAnIDOnNeitherPlane", conformance.RunCommenterRefusesAnIDOnNeitherPlane},
+		{"RefusesAnEmptyIssueID", conformance.RunCommenterRefusesAnEmptyIssueID},
+		{"DoesNotResolvePrefixes", conformance.RunCommenterDoesNotResolvePrefixes},
+		{"RecordsExactlyOneHistoryEntry", conformance.RunCommenterRecordsExactlyOneHistoryEntry},
+		{"LeavesTheAnchorIssueUntouched", conformance.RunCommenterLeavesTheAnchorIssueUntouched},
+		{"RefusesBlankText", conformance.RunCommenterRefusesBlankText},
+		{"RefusesAnEmptyAuthor", conformance.RunCommenterRefusesAnEmptyAuthor},
+		{"LeavesTheCallersRequestAlone", conformance.RunCommenterLeavesTheCallersRequestAlone},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newCommenterFixture(t, "cmt")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}
+
+func TestBatchCreatorContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.BatchCreatorFixture)
+	}{
+		{"CreatesEveryItemAsOneAct", conformance.RunBatchCreatorCreatesEveryItemAsOneAct},
+		{"MintsADistinctIDForEachIdenticalItem", conformance.RunBatchCreatorMintsADistinctIDForEachIdenticalItem},
+		{"MintsPastAnIDALaterItemNames", conformance.RunBatchCreatorMintsPastAnIDALaterItemNames},
+		{"RefusesEverythingWhenOneItemRefuses", conformance.RunBatchCreatorRefusesEverythingWhenOneItemRefuses},
+		{"RejectsAnUnusableRequest", conformance.RunBatchCreatorRejectsAnUnusableRequest},
+		{"RefusesACrossPlaneInBatchEdge", conformance.RunBatchCreatorRefusesACrossPlaneInBatchEdge},
+		{"LinksAnEarlierItemOfTheSameBatch", conformance.RunBatchCreatorLinksAnEarlierItemOfTheSameBatch},
+		{"LinksAnEarlierItemOnTheEphemeralPlane", conformance.RunBatchCreatorLinksAnEarlierItemOnTheEphemeralPlane},
+		{"KeepsAnEphemeralItemsLabelsOffTheDurablePlane", conformance.RunBatchCreatorKeepsAnEphemeralItemsLabelsOffTheDurablePlane},
+		{"RefusesAnAbsentEdgeTarget", conformance.RunBatchCreatorRefusesAnAbsentEdgeTarget},
+		{"AcceptsAForeignEdgeTarget", conformance.RunBatchCreatorAcceptsAForeignEdgeTarget},
+		{"RecordsOneHistoryEntry", conformance.RunBatchCreatorRecordsOneHistoryEntry},
+		{"RecordsNoHistoryForAnEphemeralBatch", conformance.RunBatchCreatorRecordsNoHistoryForAnEphemeralBatch},
+		{"DoesNotMutateTheCallerRequest", conformance.RunBatchCreatorDoesNotMutateTheCallerRequest},
+		{"EchoesSubSecondTimestamps", conformance.RunBatchCreatorEchoesSubSecondTimestamps},
+		{"AppliesTheDefaultPriority", conformance.RunBatchCreatorAppliesTheDefaultPriority},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newBatchCreatorFixture(t, "bcr")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}

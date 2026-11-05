@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/beads/backend/conformance"
 	"github.com/steveyegge/beads/internal/types"
@@ -217,7 +218,7 @@ var servedRoles = map[string]bool{
 	"IssueLifecycle": true, "IssueReader": true, "BatchApplier": true, "EdgeReader": true,
 	"DependencyEditor": true, "Deleter": true, "WorkspaceConfig": true, "StatsReporter": true,
 	"Releaser": true, "MetadataCAS": true, "IssueRelations": true, "IssueClaimer": true,
-	"Counter": true, "CycleDetector": true, "BatchCloser": true,
+	"Counter": true, "CycleDetector": true, "BatchCloser": true, "Commenter": true, "BatchCreator": true,
 	// The commit family is answered as a no-op (vc.go), not refused.
 	"Commit": true, "CommitWithConfig": true, "CommitMergeResolution": true, "CommitConfigOnly": true,
 	"CommitConfigUserKVOnly": true, "CommitAll": true, "CommitPending": true,
@@ -244,6 +245,8 @@ func TestServedRolesAreWired(t *testing.T) {
 		"Counter":                func() error { _, err := s.Counter(); return err },
 		"CycleDetector":          func() error { _, err := s.CycleDetector(); return err },
 		"BatchCloser":            func() error { _, err := s.BatchCloser(); return err },
+		"Commenter":              func() error { _, err := s.Commenter(); return err },
+		"BatchCreator":           func() error { _, err := s.BatchCreator(); return err },
 		"Commit":                 func() error { return s.Commit(ctx, "probe") },
 		"CommitWithConfig":       func() error { return s.CommitWithConfig(ctx, "probe") },
 		"CommitMergeResolution":  func() error { return s.CommitMergeResolution(ctx, "probe") },
@@ -385,6 +388,46 @@ func newBatchCloserFixture(t *testing.T, prefix string) (conformance.BatchCloser
 			return err
 		},
 		QueryScalar: kit.QueryScalar,
+	}, ctx
+}
+
+func newCommenterFixture(t *testing.T, prefix string) (conformance.CommenterFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	commenter, err := kit.store.Commenter()
+	if err != nil {
+		t.Fatalf("Commenter(): %v", err)
+	}
+	return conformance.CommenterFixture{
+		IssuePrefix: kit.IssuePrefix,
+		Commenter:   commenter,
+		CreateIssue: kit.CreateIssue,
+		CreateWisp:  kit.CreateWisp,
+		QueryScalar: kit.QueryScalar,
+		// CountHistory stays nil: the store keeps no commit log.
+		// ImportIssueComment is the import shape, the one path that keeps
+		// the caller's stamp, which is what the hook promises.
+		SeedCommentAt: func(ctx context.Context, issueID, author, text string, at time.Time) error {
+			_, err := kit.store.ImportIssueComment(ctx, issueID, author, text, at)
+			return err
+		},
+	}, ctx
+}
+
+func newBatchCreatorFixture(t *testing.T, prefix string) (conformance.BatchCreatorFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	creator, err := kit.store.BatchCreator()
+	if err != nil {
+		t.Fatalf("BatchCreator(): %v", err)
+	}
+	return conformance.BatchCreatorFixture{
+		IssuePrefix:  kit.IssuePrefix,
+		BatchCreator: creator,
+		CreateIssue:  kit.CreateIssue,
+		QueryScalar:  kit.QueryScalar,
+		SetConfig:    kit.SetConfig,
+		// CountHistory stays nil: the store keeps no commit log.
 	}, ctx
 }
 

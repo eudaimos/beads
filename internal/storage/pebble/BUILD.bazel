@@ -25,6 +25,8 @@ go_library(
         "readyindex.go",
         "records.go",
         "roles.go",
+        "roles_batch_create.go",
+        "roles_comment.go",
         "roles_more.go",
         "roles_read.go",
         "roles_write.go",

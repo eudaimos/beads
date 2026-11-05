@@ -20,7 +20,8 @@
 // writes through and the one the latency measurement drives), IssueReader,
 // WorkspaceConfig, StatsReporter, EdgeReader, IssueRelations, IssueClaimer,
 // Releaser, MetadataCAS, Deleter, DependencyEditor and BatchApplier, plus the
-// Counter, CycleDetector and BatchCloser roles bd's own verbs reach, the
+// Counter, CycleDetector, BatchCloser, Commenter and BatchCreator roles bd's
+// own verbs reach (comment, promote, create --file and the markdown import), the
 // commit family as a no-op (vc.go) so bd's auto-commit after each verb has
 // nothing to refuse, and the durable events journal (journal.go: the
 // journalops.Journal read, the operator's prune and activation switch, and

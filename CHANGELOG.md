@@ -28,8 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `bd init --backend=pebble` provisions a workspace on it through a new optional
   `Create` hook on the backend registry (`backends.Backend.Create`; a registered backend
   without one is still refused by init). The commit family is answered as a no-op the
-  way the `http` backend answers it, and the `Counter`, `CycleDetector` and `BatchCloser`
-  roles the CLI reaches are served. Pebble's zstd is built on its pure-Go path
+  way the `http` backend answers it, and the `Counter`, `CycleDetector`, `BatchCloser`,
+  `Commenter` and `BatchCreator` roles the CLI reaches are served: a comment lands through
+  the same live-comment body as `AddIssueComment`, and a create batch lands item by item
+  through the lifecycle create (an edge may name an earlier item of the batch, the
+  cross-plane rule is checked before anything is written, and the explicit ids a batch
+  names are claimed up front so a minted id cannot collide with one), with the
+  conformance package's Commenter and BatchCreator contracts wired. Pebble's zstd is built on its pure-Go path
   (`pebblegozstd`, applied in `.bazelrc`, a gazelle override and the Makefile tags)
   because its cgo path bundles the libzstd symbols Dolt's gozstd already bundles.
   The durable events journal is served (`storage.EventsJournalConfigurer`,

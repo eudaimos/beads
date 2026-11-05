@@ -17,6 +17,11 @@ type txn struct {
 	// dirtyBlocked collects the ids whose neighborhood a write in this
 	// transaction may have changed; recomputeBlocked settles them.
 	dirtyBlocked map[string]bool
+
+	// claimedIDs is every id a batch create has spoken for — the explicit
+	// ids its later items name and the ids it has minted so far — so mintID
+	// passes over them the way the SQL batch body's claimed set does.
+	claimedIDs map[string]bool
 }
 
 func (t *txn) markBlockedDirty(ids ...string) {

@@ -7,7 +7,6 @@ import (
 	"github.com/steveyegge/beads/backend/conformance"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/types"
-	publicops "github.com/steveyegge/beads/issueops"
 )
 
 // TestJournalContract runs the Journal contract against the pebble store, the
@@ -74,18 +73,6 @@ func TestJournalContract(t *testing.T) {
 	})
 }
 
-// kitCommenter adapts the store's comment verb to the Commenter role shape the
-// arrival hooks are bound through; the store serves no Commenter role.
-type kitCommenter struct{ s *Store }
-
-func (c kitCommenter) AddComment(ctx context.Context, request publicops.AddCommentRequest) (publicops.AddCommentResult, error) {
-	comment, err := c.s.AddIssueComment(ctx, request.IssueID, request.Author, request.Text)
-	if err != nil {
-		return publicops.AddCommentResult{}, err
-	}
-	return publicops.AddCommentResult{Comment: comment}, nil
-}
-
 func newJournalFixture(t *testing.T, prefix string) (conformance.JournalFixture, context.Context) {
 	t.Helper()
 	kit, ctx := newRoleKit(t, prefix)
@@ -108,28 +95,20 @@ func newJournalFixture(t *testing.T, prefix string) (conformance.JournalFixture,
 	if err != nil {
 		t.Fatalf("DependencyEditor(): %v", err)
 	}
-	applier, err := store.BatchApplier()
+	creator, err := store.BatchCreator()
 	if err != nil {
-		t.Fatalf("BatchApplier(): %v", err)
+		t.Fatalf("BatchCreator(): %v", err)
+	}
+	commenter, err := store.Commenter()
+	if err != nil {
+		t.Fatalf("Commenter(): %v", err)
 	}
 	arrival := conformance.ArrivalHooksFromRoles(conformance.ArrivalRoles{
-		Lifecycle: lifecycle, Reader: reader, Commenter: kitCommenter{s: store}, DependencyEditor: editor,
+		Lifecycle: lifecycle, BatchCreator: creator, Reader: reader, Commenter: commenter, DependencyEditor: editor,
 		Promote: func(ctx context.Context, id string) error {
 			return store.PromoteFromEphemeral(ctx, id, "actor")
 		},
 	})
-	// The store serves no BatchCreator; the batch applier is its batched
-	// create, and it stamps items in request order the same way.
-	arrival.CreateWispBatch = func(ctx context.Context, ids []string) error {
-		items := make([]publicops.ApplyItem, 0, len(ids))
-		for _, id := range ids {
-			items = append(items, publicops.ApplyItem{Kind: publicops.ItemCreate, Create: &publicops.CreateItem{
-				Issue: &types.Issue{ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen, Priority: 2, Ephemeral: true},
-			}})
-		}
-		_, err := applier.ApplyBatch(ctx, publicops.ApplyBatchRequest{Actor: "actor", Items: items, ForceIDPrefix: true})
-		return err
-	}
 	// The store hands out no Importer role: `bd import` runs through its bulk
 	// upsert, so the import cases drive that door.
 	arrival.Import = conformance.ArrivalUpsertImportHook(store)

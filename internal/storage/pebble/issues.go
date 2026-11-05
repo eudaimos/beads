@@ -211,6 +211,9 @@ func (t *txn) mintID(issue *types.Issue, actor string) (string, error) {
 	for length := 6; length <= 8; length++ {
 		for nonce := 0; nonce < 10; nonce++ {
 			candidate := idgen.GenerateHashID(prefix, issue.Title, issue.Description, actor, issue.CreatedAt, length, nonce)
+			if t.claimedIDs[candidate] {
+				continue
+			}
 			if ok, err := recordExists(t.kv, candidate); err != nil {
 				return "", err
 			} else if !ok {

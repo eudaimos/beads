@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -151,6 +152,27 @@ func (k roleKit) tableRows(r kv, table string) ([]sqlRow, error) {
 			return true, nil
 		})
 		return rows, err
+	case "comments", "wisp_comments":
+		want := planeIssues
+		if table == "wisp_comments" {
+			want = planeWisps
+		}
+		err := scanRecords(r, func(rec *issueRecord) (bool, error) {
+			if rec.Plane != want {
+				return true, nil
+			}
+			comments, err := commentsOf(r, rec.Issue.ID)
+			if err != nil {
+				return false, err
+			}
+			for _, c := range comments {
+				rows = append(rows, sqlRow{
+					"id": c.ID, "issue_id": c.IssueID, "author": c.Author, "text": c.Text, "created_at": c.CreatedAt,
+				})
+			}
+			return true, nil
+		})
+		return rows, err
 	case "bd_events_journal":
 		err := scanRange(r, journalKey(1), prefixEnd([]byte(nsJournal)), func(_, v []byte) (bool, error) {
 			row, err := decodeJSON[journalRow](v)
@@ -225,8 +247,19 @@ func issueRow(rec *issueRecord) sqlRow {
 		"closed_at": timeOrNil(i.ClosedAt), "due_at": timeOrNil(i.DueAt), "defer_until": timeOrNil(i.DeferUntil),
 		"priority": int64(i.Priority), "pinned": i.Pinned, "ephemeral": i.Ephemeral, "is_blocked": i.IsBlocked,
 		"await_type": nilIfEmpty(i.AwaitType), "await_id": nilIfEmpty(i.AwaitID), "timeout_ns": int64(i.Timeout),
-		"waiters": waitersColumn(i.Waiters),
+		"waiters":      waitersColumn(i.Waiters),
+		"content_hash": nilIfEmpty(rec.ContentHash), "estimated_minutes": intOrNil(i.EstimatedMinutes),
+		"sender": nilIfEmpty(i.Sender), "wisp_type": nilIfEmpty(string(i.WispType)), "is_template": i.IsTemplate,
+		"mol_type": nilIfEmpty(string(i.MolType)), "work_type": nilIfEmpty(string(i.WorkType)),
+		"source_system": nilIfEmpty(i.SourceSystem), "source_repo": nilIfEmpty(rec.SourceRepo),
 	}
+}
+
+func intOrNil(v *int) any {
+	if v == nil {
+		return nil
+	}
+	return int64(*v)
 }
 
 func depRow(r kv, dep *types.Dependency) (sqlRow, error) {
@@ -283,11 +316,13 @@ func timeOrNil(p *time.Time) any {
 
 var (
 	selectRe = regexp.MustCompile(`(?is)^\s*SELECT\s+(.+?)\s+(FROM\s+.+?)(?:\s+WHERE\s+(.+?))?\s*$`)
-	isNullRe = regexp.MustCompile(`(?is)^(.+?)\s+IS\s+(NOT\s+)?NULL$`)
-	inRe     = regexp.MustCompile(`(?is)^(.+?)\s+IN\s*\((.*)\)$`)
-	eqRe     = regexp.MustCompile(`(?s)^(.+?)\s*(=|<>|!=)\s*(\?|'(?:[^']|'')*'|-?\d+)$`)
-	joinRe   = regexp.MustCompile(`(?i)^FROM (\w+) (\w+) JOIN (\w+) (\w+) ON (\w+)\.(\w+) = (\w+)\.(\w+)$`)
-	likeRe   = regexp.MustCompile(`(?is)^(.+?)\s+LIKE\s+(\?|'(?:[^']|'')*')$`)
+	// A trailing ORDER BY, LIMIT and OFFSET, each optional, in that order.
+	orderLimitRe = regexp.MustCompile(`(?is)^(.*?)(?:\s+ORDER\s+BY\s+(.+?))?(?:\s+LIMIT\s+(\d+))?(?:\s+OFFSET\s+(\d+))?\s*$`)
+	isNullRe     = regexp.MustCompile(`(?is)^(.+?)\s+IS\s+(NOT\s+)?NULL$`)
+	inRe         = regexp.MustCompile(`(?is)^(.+?)\s+IN\s*\((.*)\)$`)
+	eqRe         = regexp.MustCompile(`(?s)^(.+?)\s*(=|<>|!=)\s*(\?|'(?:[^']|'')*'|-?\d+)$`)
+	joinRe       = regexp.MustCompile(`(?i)^FROM (\w+) (\w+) JOIN (\w+) (\w+) ON (\w+)\.(\w+) = (\w+)\.(\w+)$`)
+	likeRe       = regexp.MustCompile(`(?is)^(.+?)\s+LIKE\s+(\?|'(?:[^']|'')*')$`)
 )
 
 // queryScalar answers the contracts' scalar reads over the projected tables:
@@ -297,6 +332,10 @@ var (
 // or `expr IS [NOT] NULL`. It scans the first matching row like database/sql.
 func (k roleKit) queryScalar(ctx context.Context, query string, args []any, dest ...any) error {
 	query = strings.Join(strings.Fields(query), " ")
+	query, order, limit, offset, err := splitOrderLimit(query)
+	if err != nil {
+		return err
+	}
 	if parts, ok := scalarSum(query); ok {
 		if len(dest) != 1 {
 			return fmt.Errorf("role fixture: a summed select scans one dest, got %d", len(dest))
@@ -366,6 +405,38 @@ func (k roleKit) queryScalar(ctx context.Context, query string, args []any, dest
 			matched = append(matched, row)
 		}
 	}
+	if len(order) > 0 {
+		var sortErr error
+		sort.SliceStable(matched, func(i, j int) bool {
+			for _, term := range order {
+				cmp, err := compareValues(matched[i][term.col], matched[j][term.col])
+				if err != nil {
+					sortErr = err
+					return false
+				}
+				if cmp == 0 {
+					continue
+				}
+				if term.desc {
+					return cmp > 0
+				}
+				return cmp < 0
+			}
+			return false
+		})
+		if sortErr != nil {
+			return sortErr
+		}
+	}
+	if offset > 0 {
+		if offset > len(matched) {
+			offset = len(matched)
+		}
+		matched = matched[offset:]
+	}
+	if limit >= 0 && limit < len(matched) {
+		matched = matched[:limit]
+	}
 	if len(exprs) == 1 && strings.EqualFold(strings.TrimSpace(exprs[0]), "COUNT(*)") {
 		if len(dest) != 1 {
 			return fmt.Errorf("role fixture: COUNT(*) into %d dests", len(dest))
@@ -388,6 +459,49 @@ func (k roleKit) queryScalar(ctx context.Context, query string, args []any, dest
 		}
 	}
 	return nil
+}
+
+// orderTerm is one ORDER BY column.
+type orderTerm struct {
+	col  string
+	desc bool
+}
+
+// splitOrderLimit strips a trailing ORDER BY / LIMIT / OFFSET from a query
+// and returns them: the terms, the limit (-1 for none) and the offset.
+func splitOrderLimit(query string) (string, []orderTerm, int, int, error) {
+	m := orderLimitRe.FindStringSubmatch(query)
+	if m == nil {
+		return query, nil, -1, 0, nil
+	}
+	var order []orderTerm
+	for _, term := range splitTop(m[2], ',') {
+		fields := strings.Fields(term)
+		if len(fields) == 0 {
+			continue
+		}
+		t := orderTerm{col: strings.Trim(fields[0], "`")}
+		if len(fields) > 1 && strings.EqualFold(fields[1], "DESC") {
+			t.desc = true
+		}
+		order = append(order, t)
+	}
+	limit, offset := -1, 0
+	if m[3] != "" {
+		n, err := strconv.Atoi(m[3])
+		if err != nil {
+			return "", nil, 0, 0, err
+		}
+		limit = n
+	}
+	if m[4] != "" {
+		n, err := strconv.Atoi(m[4])
+		if err != nil {
+			return "", nil, 0, 0, err
+		}
+		offset = n
+	}
+	return strings.TrimSpace(m[1]), order, limit, offset, nil
 }
 
 // scalarSum recognizes SELECT (SELECT ...) + (SELECT ...) and returns the
@@ -589,6 +703,25 @@ func evalExpr(expr string, row sqlRow) (any, error) {
 			}
 		}
 		return nil, nil
+	case strings.HasPrefix(upper, "CONCAT_WS(") && strings.HasSuffix(expr, ")"):
+		args := splitTop(expr[len("CONCAT_WS("):len(expr)-1], ',')
+		if len(args) == 0 {
+			return nil, fmt.Errorf("role fixture: CONCAT_WS needs a separator")
+		}
+		sep := stringify(literal(args[0]))
+		var parts []string
+		for _, arg := range args[1:] {
+			v, err := evalExpr(arg, row)
+			if err != nil {
+				return nil, err
+			}
+			if v == nil {
+				// MySQL CONCAT_WS skips NULLs.
+				continue
+			}
+			parts = append(parts, stringify(v))
+		}
+		return strings.Join(parts, sep), nil
 	case strings.HasPrefix(upper, "CAST(") && strings.HasSuffix(expr, ")"):
 		inner := expr[len("CAST(") : len(expr)-1]
 		if idx := strings.LastIndex(strings.ToUpper(inner), " AS "); idx >= 0 {
