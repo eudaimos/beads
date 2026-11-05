@@ -293,7 +293,7 @@ func claimCandidates(r kv, filter types.WorkFilter) ([]*issueRecord, error) {
 			}
 		}
 		if filter.HasMetadataKey != "" || len(filter.MetadataFields) > 0 {
-			if !metadataMatches(i.Metadata, filter.HasMetadataKey, filter.MetadataFields) {
+			if !claimMetadataMatches(i.Metadata, filter.HasMetadataKey, filter.MetadataFields) {
 				return true, nil
 			}
 		}
@@ -362,9 +362,9 @@ func anyLabel(labels []string, pred func(string) bool) bool {
 	return false
 }
 
-// metadataMatches evaluates the HasMetadataKey / MetadataFields predicates
+// claimMetadataMatches evaluates the HasMetadataKey / MetadataFields predicates
 // over the row's top-level metadata keys.
-func metadataMatches(raw json.RawMessage, hasKey string, fields map[string]string) bool {
+func claimMetadataMatches(raw json.RawMessage, hasKey string, fields map[string]string) bool {
 	m := map[string]any{}
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &m); err != nil {

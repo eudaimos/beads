@@ -15,11 +15,14 @@
 // RunAll): issue CRUD, search, counts, dependencies and readiness, blocked
 // state, labels, comments, events, config and metadata, slots, statistics,
 // stale issues, iterators, transactions, claim/lease/heartbeat/reclaim,
-// promote and rekey, batch create, and the five issueops roles RunAll reaches
-// (Lifecycle, Reader, BatchCreator, DependencyEditor, Commenter). Everything
-// else — version control, history, remotes, sync, federation, compaction, the
-// remaining roles — answers *storage.ErrUnsupported through the generated
-// shell in unsupported_gen.go and is declared through RunUnsupportedContract.
+// promote and rekey, batch create, plus the Lifecycle role, which is the
+// guarded path Gas City's op journal writes through and the one the latency
+// measurement drives. Everything else — version control, history, remotes,
+// sync, federation, compaction, the other issueops roles — answers
+// *storage.ErrUnsupported through the generated shell in unsupported_gen.go
+// and is declared through RunUnsupportedContract. The role contract tier of
+// the conformance package needs single-row SQL over the relational schema
+// and does not apply to a key-value store.
 //
 // # Key layout
 //

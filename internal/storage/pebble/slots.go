@@ -41,7 +41,7 @@ func (t *txn) writeMetadata(issueID string, m map[string]json.RawMessage, actor 
 	if err := storageissueops.ValidateMetadataIfConfigured(json.RawMessage(merged)); err != nil {
 		return err
 	}
-	_, _, err = t.updateIssue(issueID, map[string]interface{}{"metadata": string(merged)}, actor, storage.UpdateIssueOptions{})
+	_, err = t.updateIssue(issueID, map[string]interface{}{"metadata": string(merged)}, actor, storage.UpdateIssueOptions{})
 	return err
 }
 
