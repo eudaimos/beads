@@ -127,8 +127,9 @@ func orphanedIDs(external map[string][]string) []string {
 
 // deleteIssues is the body of DeleteIssues (issueops.DeleteIssuesInTx). The
 // result it returns beside a guard refusal carries the dependents that
-// refused it.
-func (t *txn) deleteIssues(ids []string, cascade, force, dryRun bool) (*types.DeleteIssuesResult, error) {
+// refused it. actor is the identity the journal's records carry: "" on the
+// actorless storage surface, the request's actor through a role.
+func (t *txn) deleteIssues(ids []string, cascade, force, dryRun bool, actor string) (*types.DeleteIssuesResult, error) {
 	set, err := resolveDeletionSet(t.kv, ids, cascade)
 	if err != nil {
 		return nil, err
@@ -204,14 +205,12 @@ func (t *txn) deleteIssues(ids []string, cascade, force, dryRun bool) (*types.De
 	if dryRun {
 		return result, nil
 	}
-	// The storage surface's bulk delete carries no actor (the SQL seam's
-	// DeleteIssuesInTx passes ""), and every edge the set touches is journaled
-	// before any row goes.
-	if err := t.journalEdgeRemovalsOf(set.all, ""); err != nil {
+	// Every edge the set touches is journaled before any row goes.
+	if err := t.journalEdgeRemovalsOf(set.all, actor); err != nil {
 		return nil, err
 	}
 	for _, id := range set.all {
-		if err := t.deleteIssue(id, ""); err != nil {
+		if err := t.deleteIssue(id, actor); err != nil {
 			return nil, fmt.Errorf("delete %s: %w", id, err)
 		}
 	}
@@ -228,7 +227,9 @@ func (s *Store) DeleteIssues(ctx context.Context, ids []string, cascade bool, fo
 	}
 	var result *types.DeleteIssuesResult
 	err := s.run(ctx, func(t *txn) error {
-		r, err := t.deleteIssues(ids, cascade, force, dryRun)
+		// The storage surface's bulk delete carries no actor (the SQL
+		// seam's DeleteIssuesInTx passes "").
+		r, err := t.deleteIssues(ids, cascade, force, dryRun, "")
 		result = r
 		if err != nil || dryRun {
 			return err

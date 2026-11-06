@@ -2,9 +2,6 @@ package pebble
 
 import (
 	"context"
-	"fmt"
-	"regexp"
-	"strings"
 	"testing"
 	"time"
 
@@ -223,6 +220,8 @@ var servedRoles = map[string]bool{
 	"Counter": true, "CycleDetector": true, "BatchCloser": true, "Commenter": true, "BatchCreator": true,
 	"Querier": true, "ReadyCounter": true, "VersionReconciler": true,
 	"Heartbeater": true, "LeaseReclaimer": true, "ReadyClaimer": true,
+	"TreeWalker": true, "GraphCounter": true, "BlockingAnnotator": true, "BatchGetter": true,
+	"Sweeper": true, "Bootstrapper": true, "InitVerifier": true, "Memories": true, "MoleculeStepper": true,
 	// The commit family is answered as a no-op (vc.go), not refused.
 	"Commit": true, "CommitWithConfig": true, "CommitMergeResolution": true, "CommitConfigOnly": true,
 	"CommitConfigUserKVOnly": true, "CommitAll": true, "CommitPending": true,
@@ -257,6 +256,15 @@ func TestServedRolesAreWired(t *testing.T) {
 		"Heartbeater":            func() error { _, err := s.Heartbeater(); return err },
 		"LeaseReclaimer":         func() error { _, err := s.LeaseReclaimer(); return err },
 		"ReadyClaimer":           func() error { _, err := s.ReadyClaimer(); return err },
+		"TreeWalker":             func() error { _, err := s.TreeWalker(); return err },
+		"GraphCounter":           func() error { _, err := s.GraphCounter(); return err },
+		"BlockingAnnotator":      func() error { _, err := s.BlockingAnnotator(); return err },
+		"BatchGetter":            func() error { _, err := s.BatchGetter(); return err },
+		"Sweeper":                func() error { _, err := s.Sweeper(); return err },
+		"Bootstrapper":           func() error { _, err := s.Bootstrapper(); return err },
+		"InitVerifier":           func() error { _, err := s.InitVerifier(); return err },
+		"Memories":               func() error { _, err := s.Memories(); return err },
+		"MoleculeStepper":        func() error { _, err := s.MoleculeStepper(); return err },
 		"Commit":                 func() error { return s.Commit(ctx, "probe") },
 		"CommitWithConfig":       func() error { return s.CommitWithConfig(ctx, "probe") },
 		"CommitMergeResolution":  func() error { return s.CommitMergeResolution(ctx, "probe") },
@@ -622,46 +630,189 @@ func newCycleDetectorFixture(t *testing.T, prefix string) (conformance.CycleDete
 		Detector:    detector,
 		CreateIssue: kit.CreateIssue,
 		CreateWisp:  kit.CreateWisp,
-		Exec:        execRawEdges(kit.store),
+		Exec:        kit.exec,
 	}, ctx
 }
 
-// rawEdgeInsertRe matches the one raw statement the cycle detector contract
-// seeds with: an edge inserted straight into a dependency table, which is how
-// a cycle gets into a store whose verbs refuse to create one.
-var rawEdgeInsertRe = regexp.MustCompile(`(?i)^INSERT INTO (dependencies|wisp_dependencies) \(id, issue_id, (depends_on_issue_id|depends_on_wisp_id|depends_on_external), type, created_at, created_by, metadata\) VALUES \(\?, \?, \?, \?, NOW\(\), 'seed', '\{\}'\)$`)
+func newTreeWalkerFixture(t *testing.T, prefix string) (conformance.TreeWalkerFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	walker, err := kit.store.TreeWalker()
+	if err != nil {
+		t.Fatalf("TreeWalker(): %v", err)
+	}
+	return conformance.TreeWalkerFixture{
+		IssuePrefix:   kit.IssuePrefix,
+		TreeWalker:    walker,
+		CreateIssue:   kit.CreateIssue,
+		CreateWisp:    kit.CreateWisp,
+		AddDependency: kit.AddDependency,
+		Exec:          kit.exec,
+		// CountHistory stays nil: the store keeps no commit log.
+	}, ctx
+}
 
-// execRawEdges answers the cycle detector fixture's Exec hook: foreign-key
-// toggles are no-ops (the edge keys carry no constraint), and an edge insert
-// writes the edge key directly, bypassing every verb-level check.
-func execRawEdges(s *Store) func(context.Context, []conformance.SQLStatement) error {
-	return func(ctx context.Context, statements []conformance.SQLStatement) error {
-		return s.run(ctx, func(t *txn) error {
-			for _, st := range statements {
-				query := strings.Join(strings.Fields(st.Query), " ")
-				if strings.HasPrefix(strings.ToUpper(query), "SET FOREIGN_KEY_CHECKS") {
-					continue
-				}
-				if !rawEdgeInsertRe.MatchString(query) {
-					return fmt.Errorf("role fixture: unsupported raw statement %q", st.Query)
-				}
-				if len(st.Args) != 4 {
-					return fmt.Errorf("role fixture: edge insert wants 4 args, got %d", len(st.Args))
-				}
-				dep := &types.Dependency{
-					ID:          fmt.Sprint(st.Args[0]),
-					IssueID:     fmt.Sprint(st.Args[1]),
-					DependsOnID: fmt.Sprint(st.Args[2]),
-					Type:        types.DependencyType(fmt.Sprint(st.Args[3])),
-					CreatedAt:   nowUTC(),
-					CreatedBy:   "seed",
-					Metadata:    "{}",
-				}
-				if err := putEdge(t.kv, dep); err != nil {
+func newGraphCounterFixture(t *testing.T, prefix string) (conformance.GraphCounterFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	counter, err := kit.store.GraphCounter()
+	if err != nil {
+		t.Fatalf("GraphCounter(): %v", err)
+	}
+	return conformance.GraphCounterFixture{
+		IssuePrefix:   kit.IssuePrefix,
+		GraphCounter:  counter,
+		CreateIssue:   kit.CreateIssue,
+		CreateWisp:    kit.CreateWisp,
+		AddDependency: kit.AddDependency,
+	}, ctx
+}
+
+func newBatchGetterFixture(t *testing.T, prefix string) (conformance.BatchGetterFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	getter, err := kit.store.BatchGetter()
+	if err != nil {
+		t.Fatalf("BatchGetter(): %v", err)
+	}
+	return conformance.BatchGetterFixture{
+		IssuePrefix: kit.IssuePrefix,
+		BatchGetter: getter,
+		CreateIssue: kit.CreateIssue,
+		CreateIssues: func(ctx context.Context, issues []*types.Issue, actor string) error {
+			return kit.store.CreateIssuesWithFullOptions(ctx, issues, actor, storage.BatchCreateOptions{SkipPrefixValidation: true})
+		},
+		CreateWisp: kit.CreateWisp,
+	}, ctx
+}
+
+func newBlockingAnnotatorFixture(t *testing.T, prefix string) (conformance.BlockingAnnotatorFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	annotator, err := kit.store.BlockingAnnotator()
+	if err != nil {
+		t.Fatalf("BlockingAnnotator(): %v", err)
+	}
+	return conformance.BlockingAnnotatorFixture{
+		IssuePrefix:   kit.IssuePrefix,
+		Annotator:     annotator,
+		CreateIssue:   kit.CreateIssue,
+		CreateWisp:    kit.CreateWisp,
+		AddDependency: kit.AddDependency,
+	}, ctx
+}
+
+func newSweeperFixture(t *testing.T, prefix string) (conformance.SweeperFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	s := kit.store
+	sweeper, err := s.Sweeper()
+	if err != nil {
+		t.Fatalf("Sweeper(): %v", err)
+	}
+	editor, err := s.DependencyEditor()
+	if err != nil {
+		t.Fatalf("DependencyEditor(): %v", err)
+	}
+	commenter, err := s.Commenter()
+	if err != nil {
+		t.Fatalf("Commenter(): %v", err)
+	}
+	return conformance.SweeperFixture{
+		IssuePrefix:   kit.IssuePrefix,
+		Sweeper:       sweeper,
+		CreateIssue:   kit.CreateIssue,
+		CreateWisp:    kit.CreateWisp,
+		QueryScalar:   kit.QueryScalar,
+		CommitPending: kit.CommitPending,
+		Exec:          kit.exec,
+		AddDependencies: func(ctx context.Context, req publicops.AddDependenciesRequest) error {
+			_, err := editor.AddDependencies(ctx, req)
+			return err
+		},
+		AddComment: func(ctx context.Context, issueID, author, text string) error {
+			_, err := commenter.AddComment(ctx, publicops.AddCommentRequest{IssueID: issueID, Author: author, Text: text})
+			return err
+		},
+		// CountHistory stays nil: the store keeps no commit log.
+	}, ctx
+}
+
+func newBootstrapperFixture(t *testing.T, prefix string) (conformance.BootstrapperFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	s := kit.store
+	bootstrapper, err := s.Bootstrapper()
+	if err != nil {
+		t.Fatalf("Bootstrapper(): %v", err)
+	}
+	verifier, err := s.InitVerifier()
+	if err != nil {
+		t.Fatalf("InitVerifier(): %v", err)
+	}
+	return conformance.BootstrapperFixture{
+		Bootstrapper: bootstrapper,
+		InitVerifier: verifier,
+		// SeedIdentity writes the two markers past both roles; "" unseeds one,
+		// which the roles read as an absent key.
+		SeedIdentity: func(ctx context.Context, prefix, projectID string) error {
+			return s.run(ctx, func(t *txn) error {
+				if prefix == "" {
+					if err := t.kv.del(configKey(workapi.ConfigKeyIssuePrefix)); err != nil {
+						return err
+					}
+				} else if err := setConfig(t.kv, workapi.ConfigKeyIssuePrefix, prefix); err != nil {
 					return err
 				}
-			}
-			return nil
-		})
+				if projectID == "" {
+					return t.kv.del(metadataKey(workapi.MetadataKeyProjectID))
+				}
+				return t.kv.set(metadataKey(workapi.MetadataKeyProjectID), []byte(projectID))
+			})
+		},
+		// CountHistory stays nil: the store keeps no commit log.
+	}, ctx
+}
+
+func newMemoriesFixture(t *testing.T, prefix string) (conformance.MemoriesFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	memories, err := kit.store.Memories()
+	if err != nil {
+		t.Fatalf("Memories(): %v", err)
 	}
+	return conformance.MemoriesFixture{
+		IssuePrefix: kit.IssuePrefix,
+		Memories:    memories,
+		SetConfig:   kit.SetConfig,
+		QueryScalar: kit.QueryScalar,
+	}, ctx
+}
+
+func newMoleculeFixture(t *testing.T, prefix string) (conformance.MoleculeFixture, context.Context) {
+	t.Helper()
+	kit, ctx := newRoleKit(t, prefix)
+	s := kit.store
+	lifecycle, err := s.IssueLifecycle()
+	if err != nil {
+		t.Fatalf("IssueLifecycle(): %v", err)
+	}
+	closer, err := s.BatchCloser()
+	if err != nil {
+		t.Fatalf("BatchCloser(): %v", err)
+	}
+	stepper, err := s.MoleculeStepper()
+	if err != nil {
+		t.Fatalf("MoleculeStepper(): %v", err)
+	}
+	return conformance.MoleculeFixture{
+		IssuePrefix:   kit.IssuePrefix,
+		Lifecycle:     lifecycle,
+		BatchCloser:   closer,
+		Stepper:       stepper,
+		CreateIssue:   kit.CreateIssue,
+		CreateWisp:    kit.CreateWisp,
+		AddDependency: kit.AddDependency,
+		QueryScalar:   kit.QueryScalar,
+	}, ctx
 }

@@ -847,49 +847,56 @@ func (s *Store) GetDependencyCounts(ctx context.Context, issueIDs []string) (map
 // is blocked by, the issues each blocks, and each one's parent
 // (issueops.GetBlockingInfoForIssuesInTx: a closed end drops out).
 func (s *Store) GetBlockingInfoForIssues(ctx context.Context, issueIDs []string) (blockedByMap map[string][]string, blocksMap map[string][]string, parentMap map[string]string, err error) {
-	blockedByMap = make(map[string][]string)
-	blocksMap = make(map[string][]string)
-	parentMap = make(map[string]string)
 	err = s.read(func(r kv) error {
-		for _, id := range issueIDs {
-			outs, err := outgoingEdges(r, id)
-			if err != nil {
-				return err
-			}
-			for _, d := range outs {
-				if d.Type != types.DepBlocks && d.Type != types.DepParentChild {
-					continue
-				}
-				if closed, err := recordClosed(r, d.DependsOnID); err != nil {
-					return err
-				} else if closed {
-					continue
-				}
-				if d.Type == types.DepParentChild {
-					parentMap[id] = d.DependsOnID
-				} else {
-					blockedByMap[id] = append(blockedByMap[id], d.DependsOnID)
-				}
-			}
-			if closed, err := recordClosed(r, id); err != nil {
-				return err
-			} else if closed {
-				continue
-			}
-			ins, err := incomingEdges(r, id)
-			if err != nil {
-				return err
-			}
-			for _, d := range ins {
-				if d.Type == types.DepBlocks {
-					blocksMap[id] = append(blocksMap[id], d.IssueID)
-				}
-			}
-		}
-		return nil
+		blockedByMap, blocksMap, parentMap, err = blockingInfo(r, issueIDs)
+		return err
 	})
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	return blockedByMap, blocksMap, parentMap, nil
+}
+
+// blockingInfo is the body of GetBlockingInfoForIssues over one read view:
+// the shared read the flat verb and the BlockingAnnotator role both run.
+func blockingInfo(r kv, issueIDs []string) (blockedByMap map[string][]string, blocksMap map[string][]string, parentMap map[string]string, err error) {
+	blockedByMap = make(map[string][]string)
+	blocksMap = make(map[string][]string)
+	parentMap = make(map[string]string)
+	for _, id := range issueIDs {
+		outs, err := outgoingEdges(r, id)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		for _, d := range outs {
+			if d.Type != types.DepBlocks && d.Type != types.DepParentChild {
+				continue
+			}
+			if closed, err := recordClosed(r, d.DependsOnID); err != nil {
+				return nil, nil, nil, err
+			} else if closed {
+				continue
+			}
+			if d.Type == types.DepParentChild {
+				parentMap[id] = d.DependsOnID
+			} else {
+				blockedByMap[id] = append(blockedByMap[id], d.DependsOnID)
+			}
+		}
+		if closed, err := recordClosed(r, id); err != nil {
+			return nil, nil, nil, err
+		} else if closed {
+			continue
+		}
+		ins, err := incomingEdges(r, id)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		for _, d := range ins {
+			if d.Type == types.DepBlocks {
+				blocksMap[id] = append(blocksMap[id], d.IssueID)
+			}
+		}
 	}
 	return blockedByMap, blocksMap, parentMap, nil
 }

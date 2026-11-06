@@ -813,3 +813,240 @@ func TestReadyClaimerContract(t *testing.T) {
 		})
 	}
 }
+
+func TestTreeWalkerContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.TreeWalkerFixture)
+	}{
+		{"WalksTheDependenciesOfARoot", conformance.RunTreeWalkerWalksTheDependenciesOfARoot},
+		{"WalksDependentsWhenAskedUp", conformance.RunTreeWalkerWalksDependentsWhenAskedUp},
+		{"BoundsTheDescentAtMaxDepth", conformance.RunTreeWalkerBoundsTheDescentAtMaxDepth},
+		{"TerminatesOnACycle", conformance.RunTreeWalkerTerminatesOnACycle},
+		{"RendersASharedSubtreeOnce", conformance.RunTreeWalkerRendersASharedSubtreeOnce},
+		{"MergesTheDurableAndEphemeralPlanes", conformance.RunTreeWalkerMergesTheDurableAndEphemeralPlanes},
+		{"FollowsEveryTypeButRelatesTo", conformance.RunTreeWalkerFollowsEveryTypeButRelatesTo},
+		{"PrunesEachHalfOfABothWalk", conformance.RunTreeWalkerPrunesEachHalfOfABothWalk},
+		{"AnswersBothDirectionsWithTheRootOnce", conformance.RunTreeWalkerAnswersBothDirectionsWithTheRootOnce},
+		{"PrunesByStatusKeepingAncestors", conformance.RunTreeWalkerPrunesByStatusKeepingAncestors},
+		{"PrunesEverythingWhenNothingMatches", conformance.RunTreeWalkerPrunesEverythingWhenNothingMatches},
+		{"AnswersARootWithNoEdges", conformance.RunTreeWalkerAnswersARootWithNoEdges},
+		{"RefusesAnAbsentRoot", conformance.RunTreeWalkerRefusesAnAbsentRoot},
+		{"ResolvesTheRootIDExactly", conformance.RunTreeWalkerResolvesTheRootIDExactly},
+		{"CrossesPlanesFromAWispRootAndUpward", conformance.RunTreeWalkerCrossesPlanesFromAWispRootAndUpward},
+		{"RefusesAnInvalidRequest", conformance.RunTreeWalkerRefusesAnInvalidRequest},
+		{"RefusesAWalkOverTheRowCap", conformance.RunTreeWalkerRefusesAWalkOverTheRowCap},
+		{"WritesNothing", conformance.RunTreeWalkerWritesNothing},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newTreeWalkerFixture(t, "twk")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}
+
+func TestGraphCounterContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.GraphCounterFixture)
+	}{
+		{"CountsOutboundEdges", conformance.RunGraphCounterCountsOutboundEdges},
+		{"CountsInboundEdges", conformance.RunGraphCounterCountsInboundEdges},
+		{"AnswersOnePerAnchorInRequestOrder", conformance.RunGraphCounterAnswersOnePerAnchorInRequestOrder},
+		{"DistinguishesNoEdgesFromNoAnchor", conformance.RunGraphCounterDistinguishesNoEdgesFromNoAnchor},
+		{"CollapsesRepeatedAnchors", conformance.RunGraphCounterCollapsesRepeatedAnchors},
+		{"FiltersEdgesNotAnchors", conformance.RunGraphCounterFiltersEdgesNotAnchors},
+		{"NarrowsInboundByDependentStatus", conformance.RunGraphCounterNarrowsInboundByDependentStatus},
+		{"CountsAcrossBothPlanes", conformance.RunGraphCounterCountsAcrossBothPlanes},
+		{"NarrowsAWispDependentByStatus", conformance.RunGraphCounterNarrowsAWispDependentByStatus},
+		{"ResolvesIDsExactly", conformance.RunGraphCounterResolvesIDsExactly},
+		{"AnswersAnEmptyRequest", conformance.RunGraphCounterAnswersAnEmptyRequest},
+		{"RefusesAnUnusableRequest", conformance.RunGraphCounterRefusesAnUnusableRequest},
+		{"LeavesTheRequestAlone", conformance.RunGraphCounterLeavesTheRequestAlone},
+		{"WritesNothing", conformance.RunGraphCounterWritesNothing},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newGraphCounterFixture(t, "gcn")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}
+
+func TestBatchGetterContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.BatchGetterFixture)
+	}{
+		{"FindsRequestedIssues", conformance.RunBatchGetterFindsRequestedIssues},
+		{"ReportsMissingIDs", conformance.RunBatchGetterReportsMissingIDs},
+		{"CollapsesRepeatedIDs", conformance.RunBatchGetterCollapsesRepeatedIDs},
+		{"AnswersInRequestOrder", conformance.RunBatchGetterAnswersInRequestOrder},
+		{"ResolvesIDsExactly", conformance.RunBatchGetterResolvesIDsExactly},
+		{"AnswersAnEmptyRequest", conformance.RunBatchGetterAnswersAnEmptyRequest},
+		{"RefusesAnUnusableRequest", conformance.RunBatchGetterRefusesAnUnusableRequest},
+		{"RefusesOverTheCap", conformance.RunBatchGetterRefusesOverTheCap},
+		{"AcceptsExactlyTheCap", conformance.RunBatchGetterAcceptsExactlyTheCap},
+		{"HydratesLabels", conformance.RunBatchGetterHydratesLabels},
+		{"LeavesTheRequestAlone", conformance.RunBatchGetterLeavesTheRequestAlone},
+		{"SharesOneReadStructurally", conformance.RunBatchGetterSharesOneReadStructurally},
+		{"CrossesBothPlanes", conformance.RunBatchGetterCrossesBothPlanes},
+		{"WritesNothing", conformance.RunBatchGetterWritesNothing},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newBatchGetterFixture(t, "bge")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}
+
+func TestBlockingAnnotatorContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.BlockingAnnotatorFixture)
+	}{
+		{"AnswersOnePerIDInRequestOrder", conformance.RunBlockingAnnotatorAnswersOnePerIDInRequestOrder},
+		{"CollapsesRepeatedIDs", conformance.RunBlockingAnnotatorCollapsesRepeatedIDs},
+		{"ReportsOpenBlockersOnly", conformance.RunBlockingAnnotatorReportsOpenBlockersOnly},
+		{"ReportsTheInboundDirection", conformance.RunBlockingAnnotatorReportsTheInboundDirection},
+		{"SeparatesParentFromBlockers", conformance.RunBlockingAnnotatorSeparatesParentFromBlockers},
+		{"DropsAClosedParent", conformance.RunBlockingAnnotatorDropsAClosedParent},
+		{"OrdersAndCollapsesEachList", conformance.RunBlockingAnnotatorOrdersAndCollapsesEachList},
+		{"CountsAnUnresolvableBlockerAsOpen", conformance.RunBlockingAnnotatorCountsAnUnresolvableBlockerAsOpen},
+		{"ReadsBothPlanes", conformance.RunBlockingAnnotatorReadsBothPlanes},
+		{"IgnoresNonBlockingEdgeTypes", conformance.RunBlockingAnnotatorIgnoresNonBlockingEdgeTypes},
+		{"AnnotatesAnAbsentIDBare", conformance.RunBlockingAnnotatorAnnotatesAnAbsentIDBare},
+		{"ResolvesExactIDsOnly", conformance.RunBlockingAnnotatorResolvesExactIDsOnly},
+		{"ReportsAtMostOneParent", conformance.RunBlockingAnnotatorReportsAtMostOneParent},
+		{"AnswersAnEmptyRequest", conformance.RunBlockingAnnotatorAnswersAnEmptyRequest},
+		{"RefusesAnEmptyID", conformance.RunBlockingAnnotatorRefusesAnEmptyID},
+		{"LeavesTheRequestAlone", conformance.RunBlockingAnnotatorLeavesTheRequestAlone},
+		{"WritesNothing", conformance.RunBlockingAnnotatorWritesNothing},
+		{"ReportsTheTransitiveBlockedFlag", conformance.RunBlockingAnnotatorReportsTheTransitiveBlockedFlag},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newBlockingAnnotatorFixture(t, "blk")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}
+
+func TestSweeperContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.SweeperFixture)
+	}{
+		{"RefusesAnUnfilteredDurableSweep", conformance.RunSweeperRefusesAnUnfilteredDurableSweep},
+		{"RefusesAMalformedRequest", conformance.RunSweeperRefusesAMalformedRequest},
+		{"ClearsOneTierAndLeavesTheOther", conformance.RunSweeperClearsOneTierAndLeavesTheOther},
+		{"TreatsALegacyTypedWispAsEphemeralTier", conformance.RunSweeperTreatsALegacyTypedWispAsEphemeralTier},
+		{"LeavesNoHistoryBeadsToTheDurableTier", conformance.RunSweeperLeavesNoHistoryBeadsToTheDurableTier},
+		{"ProtectsPinnedRows", conformance.RunSweeperProtectsPinnedRows},
+		{"HonorsTheCutoffAndThePattern", conformance.RunSweeperHonorsTheCutoffAndThePattern},
+		{"DryRunChangesNothing", conformance.RunSweeperDryRunChangesNothing},
+		{"ProtectsRowsCitedFromAWispComment", conformance.RunSweeperProtectsRowsCitedFromAWispComment},
+		{"ProtectsCitedRows", conformance.RunSweeperProtectsCitedRows},
+		{"EmptyMatchIsZeroAndNil", conformance.RunSweeperEmptyMatchIsZeroAndNil},
+		{"RecordsExactlyOneHistoryEntry", conformance.RunSweeperRecordsExactlyOneHistoryEntry},
+		{"DoesNotMutateTheCallerRequest", conformance.RunSweeperDoesNotMutateTheCallerRequest},
+		{"WispsPlaneClearsTheWholeWispsTable", conformance.RunSweeperWispsPlaneClearsTheWholeWispsTable},
+		{"WispsPlaneRequiresAFilter", conformance.RunSweeperWispsPlaneRequiresAFilter},
+		{"ProtectsLiveDependents", conformance.RunSweeperProtectsLiveDependents},
+		{"ProtectsTransitiveLiveDependents", conformance.RunSweeperProtectsTransitiveLiveDependents},
+		{"ProtectsLiveDependentsAcrossPlanes", conformance.RunSweeperProtectsLiveDependentsAcrossPlanes},
+		{"LimitTakesTheOldestClosedFirst", conformance.RunSweeperLimitTakesTheOldestClosedFirst},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newSweeperFixture(t, "swp")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}
+
+func TestBootstrapperContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.BootstrapperFixture)
+	}{
+		{"IdentifiesAFreshSubstrate", conformance.RunBootstrapperIdentifiesAFreshSubstrate},
+		{"StoresThePrefixWithoutItsTrailingHyphen", conformance.RunBootstrapperStoresThePrefixWithoutItsTrailingHyphen},
+		{"RefusesAnIdentifiedSubstrate", conformance.RunBootstrapperRefusesAnIdentifiedSubstrate},
+		{"RefusesASubstrateCarryingOnlyAPrefix", conformance.RunBootstrapperRefusesASubstrateCarryingOnlyAPrefix},
+		{"RefusesASubstrateCarryingOnlyAProjectID", conformance.RunBootstrapperRefusesASubstrateCarryingOnlyAProjectID},
+		{"RefusesAnInvalidRequestWithoutWriting", conformance.RunBootstrapperRefusesAnInvalidRequestWithoutWriting},
+		{"LeavesTheSubstrateUntouchedWhenItCannotComplete", conformance.RunBootstrapperLeavesTheSubstrateUntouchedWhenItCannotComplete},
+		{"RecordsNoHistoryEntryOfItsOwn", conformance.RunBootstrapperRecordsNoHistoryEntryOfItsOwn},
+		{"RecordsExactlyOneHistoryEntry", conformance.RunBootstrapperRecordsExactlyOneHistoryEntry},
+		{"VerifierAnswersEmptyForAnUnidentifiedSubstrate", conformance.RunInitVerifierAnswersEmptyForAnUnidentifiedSubstrate},
+		{"VerifierReportsAPartialIdentityAsItStands", conformance.RunInitVerifierReportsAPartialIdentityAsItStands},
+		{"VerifierReportsAFailedReadAsAnError", conformance.RunInitVerifierReportsAFailedReadAsAnError},
+		{"VerifierWritesNothing", conformance.RunInitVerifierWritesNothing},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newBootstrapperFixture(t, "boot")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}
+
+func TestMemoriesContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.MemoriesFixture)
+	}{
+		{"ListOfAnEmptyPlaneAnswersAnEmptyMap", conformance.RunMemoriesListOfAnEmptyPlaneAnswersAnEmptyMap},
+		{"RememberStoresContentVerbatim", conformance.RunMemoriesRememberStoresContentVerbatim},
+		{"RememberDerivesTheKeyWhenAbsent", conformance.RunMemoriesRememberDerivesTheKeyWhenAbsent},
+		{"RememberWithExplicitKeyStoresVerbatim", conformance.RunMemoriesRememberWithExplicitKeyStoresVerbatim},
+		{"RememberReplacesAndReportsIt", conformance.RunMemoriesRememberReplacesAndReportsIt},
+		{"RememberRefusesEmptyContent", conformance.RunMemoriesRememberRefusesEmptyContent},
+		{"RememberRefusesAWhitespaceOnlyKey", conformance.RunMemoriesRememberRefusesAWhitespaceOnlyKey},
+		{"RememberRefusesAnUnderivableKey", conformance.RunMemoriesRememberRefusesAnUnderivableKey},
+		{"RecallAnswersTheStoredValue", conformance.RunMemoriesRecallAnswersTheStoredValue},
+		{"RecallReportsAMissAsNotFoundNotAnError", conformance.RunMemoriesRecallReportsAMissAsNotFoundNotAnError},
+		{"EmptyRowIsPresentUntilForgotten", conformance.RunMemoriesEmptyRowIsPresentUntilForgotten},
+		{"ForgetRemovesExactlyTheNamedRow", conformance.RunMemoriesForgetRemovesExactlyTheNamedRow},
+		{"ForgetNeverTouchesTheSettingsPlane", conformance.RunMemoriesForgetNeverTouchesTheSettingsPlane},
+		{"ForgetReportsTheForgottenValue", conformance.RunMemoriesForgetReportsTheForgottenValue},
+		{"ForgetOfAnAbsentKeyIsNotFoundAndDeletesNothing", conformance.RunMemoriesForgetOfAnAbsentKeyIsNotFoundAndDeletesNothing},
+		{"ListReturnsOnlyTheMemoryPlane", conformance.RunMemoriesListReturnsOnlyTheMemoryPlane},
+		{"ListSearchMatchesTheUserKeyNotTheStorageKey", conformance.RunMemoriesListSearchMatchesTheUserKeyNotTheStorageKey},
+		{"ListSearchMatchesKeyOrValueCaseInsensitively", conformance.RunMemoriesListSearchMatchesKeyOrValueCaseInsensitively},
+		{"ARefusedWriteRecordsNoHistory", conformance.RunMemoriesARefusedWriteRecordsNoHistory},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newMemoriesFixture(t, "mem")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}
+
+func TestMoleculeContract(t *testing.T) {
+	cases := []struct {
+		name string
+		run  func(*testing.T, context.Context, conformance.MoleculeFixture)
+	}{
+		{"CloseAutoClosesTheCompletedRoot", conformance.RunMoleculeCloseAutoClosesTheCompletedRoot},
+		{"AutoCloseIsOptInAndRuleBound", conformance.RunMoleculeAutoCloseIsOptInAndRuleBound},
+		{"RecloseHealsAStrandedRoot", conformance.RunMoleculeRecloseHealsAStrandedRoot},
+		{"BatchCloseAutoClosesTheRootOnce", conformance.RunMoleculeBatchCloseAutoClosesTheRootOnce},
+		{"RefusedRootKeepsTheStepClose", conformance.RunMoleculeRefusedRootKeepsTheStepClose},
+		{"GuardedRootKeepsTheStepClose", conformance.RunMoleculeGuardedRootKeepsTheStepClose},
+		{"StepperClaimsTheNextReadyStepForTheActor", conformance.RunMoleculeStepperClaimsTheNextReadyStepForTheActor},
+		{"StepperNeverTakesAStepAnotherActorHolds", conformance.RunMoleculeStepperNeverTakesAStepAnotherActorHolds},
+		{"StepperAnswersCompleteAndOutsideAMolecule", conformance.RunMoleculeStepperAnswersCompleteAndOutsideAMolecule},
+		{"StepperClaimsAWispStep", conformance.RunMoleculeStepperClaimsAWispStep},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fixture, ctx := newMoleculeFixture(t, "mol")
+			tc.run(t, ctx, fixture)
+		})
+	}
+}

@@ -17,6 +17,6 @@ func init() {
 		wiringRoot: "internal/storage/pebble",
 		adopting: "the Phase 0 spike wires the contracts of the roles it serves and skips those of the " +
 			"roles its generated unsupported shell still answers; the ceiling falls as roles land",
-		adoptionCeiling: 266,
+		adoptionCeiling: 141,
 	})
 }

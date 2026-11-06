@@ -77,6 +77,15 @@ var (
 	execDeleteLeaseRe = regexp.MustCompile(`(?i)^DELETE FROM leases WHERE issue_id = \?$`)
 	execInsertLeaseRe = regexp.MustCompile(`(?i)^INSERT INTO leases \(issue_id, holder, granted_at, lease_expires_at, heartbeat_at, granted_node\) VALUES \(\?, \?, \?, \?, \?, ''\)$`)
 	execInsertLabelRe = regexp.MustCompile(`(?i)^INSERT INTO labels \(issue_id, label\) VALUES \(\?, \?\)$`)
+	// The sweeper contract manufactures the legacy typed-wisp shape (issues
+	// plane, wisp_type set, ephemeral unset) with a raw UPDATE, since no
+	// current create path mints it.
+	execUpdateWispTypeRe = regexp.MustCompile(`(?i)^UPDATE issues SET wisp_type = '([^']*)' WHERE id = \?$`)
+	// The cycle detector and tree walker contracts seed an edge straight into
+	// a dependency table, which is how a cycle gets into a store whose verbs
+	// refuse to create one.
+	execInsertEdgeRe = regexp.MustCompile(`(?i)^INSERT INTO (dependencies|wisp_dependencies) \(id, issue_id, (depends_on_issue_id|depends_on_wisp_id|depends_on_external), type, created_at, created_by, metadata\) VALUES \(\?, \?, \?, \?, NOW\(\), 'seed', '\{\}'\)$`)
+	unionAllRe       = regexp.MustCompile(`(?i)\s+UNION\s+ALL\s+`)
 )
 
 // exec answers the handful of raw write statements the lease contracts use
@@ -175,6 +184,30 @@ func (k roleKit) execOne(t *txn, query string, args []any) error {
 		old := *rec
 		rec.Issue.Labels = dedupeSorted(append(append([]string(nil), rec.Issue.Labels...), stringify(args[1])))
 		return putRecord(t.kv, &old, rec)
+	case execUpdateWispTypeRe.MatchString(query):
+		rec, err := getRecord(t.kv, stringify(args[0]))
+		if err != nil {
+			return err
+		}
+		old := *rec
+		rec.Issue.WispType = types.WispType(execUpdateWispTypeRe.FindStringSubmatch(query)[1])
+		return putRecord(t.kv, &old, rec)
+	case strings.HasPrefix(strings.ToUpper(query), "SET FOREIGN_KEY_CHECKS"):
+		// The edge keys carry no constraint to toggle.
+		return nil
+	case execInsertEdgeRe.MatchString(query):
+		if len(args) != 4 {
+			return fmt.Errorf("role fixture: edge insert wants 4 args, got %d", len(args))
+		}
+		return putEdge(t.kv, &types.Dependency{
+			ID:          stringify(args[0]),
+			IssueID:     stringify(args[1]),
+			DependsOnID: stringify(args[2]),
+			Type:        types.DependencyType(stringify(args[3])),
+			CreatedAt:   nowUTC(),
+			CreatedBy:   "seed",
+			Metadata:    "{}",
+		})
 	}
 	return fmt.Errorf("role fixture: unsupported statement %q", query)
 }
@@ -443,8 +476,25 @@ var (
 // comparison, and a predicate is `expr = ?`, `expr = 'lit'`, `col IN (...)`
 // or `expr IS [NOT] NULL`. It scans the first matching row like database/sql.
 func (k roleKit) queryScalar(ctx context.Context, query string, args []any, dest ...any) error {
-	query = strings.Join(strings.Fields(query), " ")
+	query = strings.ReplaceAll(strings.Join(strings.Fields(query), " "), "`", "")
 	query = betweenRe.ReplaceAllString(query, "BETWEEN $1 ~AND~ $2")
+	// A UNION ALL of single-row selects answers with the first leg that
+	// finds a row (the molecule contract reads one id from whichever plane
+	// holds it that way); each leg takes the arguments it binds.
+	if legs := unionAllRe.Split(query, -1); len(legs) > 1 {
+		err := sql.ErrNoRows
+		for _, leg := range legs {
+			n := strings.Count(leg, "?")
+			if n > len(args) {
+				return fmt.Errorf("role fixture: union leg %q wants more args than given", leg)
+			}
+			if err = k.queryScalar(ctx, leg, args[:n], dest...); err == nil {
+				return nil
+			}
+			args = args[n:]
+		}
+		return err
+	}
 	query, order, limit, offset, err := splitOrderLimit(query)
 	if err != nil {
 		return err

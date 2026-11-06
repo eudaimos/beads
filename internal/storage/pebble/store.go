@@ -143,6 +143,16 @@ func (s *Store) readCtx(ctx context.Context, fn func(r kv) error) error {
 	return s.read(fn)
 }
 
+// readSnapshotCtx is readSnapshot for a caller whose context may already be
+// done, the way readCtx is read: the cancellation is reported before the
+// snapshot is taken.
+func (s *Store) readSnapshotCtx(ctx context.Context, fn func(r kv) error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.readSnapshot(fn)
+}
+
 // readSnapshot runs fn against one consistent snapshot of the committed
 // database, for a read whose parts must not straddle a commit.
 func (s *Store) readSnapshot(fn func(r kv) error) error {

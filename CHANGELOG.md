@@ -39,9 +39,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bodies, and the lease family (`Heartbeater`, `LeaseReclaimer`, `ReadyClaimer`) over
   the store's own claim, renewal and reclaim bodies, with all six contracts wired; lease
   stamps are now whole seconds, as the SQL lease columns hold them, and a metadata
-  read on a canceled context reports the cancellation. The storage tree's contract-leg
+  read on a canceled context reports the cancellation. The remaining nine bd-only roles
+  are served too, so every issueops role accessor the storage interface publishes is
+  answered: `TreeWalker`, `GraphCounter`, `BlockingAnnotator` and `BatchGetter` read one
+  snapshot each over the edge keys and the shared finishing bodies; `Sweeper` selects,
+  rechecks, protects and deletes in one transaction through the shared `workapi` sweep
+  bodies (a retaining sweep is refused with `*ErrUnsupported`, since the store keeps no
+  id tombstones); `Bootstrapper` and `InitVerifier` read and write the identity pair in
+  one transaction and one snapshot; `Memories` lives on the config keys under the one
+  storage prefix the SQL bodies encode with; and `MoleculeStepper` is the shared stepper
+  composed over the store's own roles. Their 125 contract cases are wired, with the
+  history-count clauses skipped by name. The storage tree's contract-leg
   registry holds the pebble leg to the role tier under an adoption ceiling that falls
-  as roles land. Pebble's zstd is built on its pure-Go path
+  as roles land (now 141, every remaining entry a role the generated shell no longer
+  answers for or a contract outside the role tier). Pebble's zstd is built on its pure-Go path
   (`pebblegozstd`, applied in `.bazelrc`, a gazelle override and the Makefile tags)
   because its cgo path bundles the libzstd symbols Dolt's gozstd already bundles.
   The durable events journal is served (`storage.EventsJournalConfigurer`,

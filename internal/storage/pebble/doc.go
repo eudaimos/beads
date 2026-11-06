@@ -21,18 +21,23 @@
 // WorkspaceConfig, StatsReporter, EdgeReader, IssueRelations, IssueClaimer,
 // Releaser, MetadataCAS, Deleter, DependencyEditor and BatchApplier, plus the
 // roles bd's own verbs reach: Counter, CycleDetector, BatchCloser, Commenter,
-// BatchCreator, Querier, ReadyCounter, VersionReconciler, and the lease
-// family (Heartbeater, LeaseReclaimer, ReadyClaimer) over the claim bodies, the
-// commit family as a no-op (vc.go) so bd's auto-commit after each verb has
-// nothing to refuse, and the durable events journal (journal.go: the
-// journalops.Journal read, the operator's prune and activation switch, and
-// the wisp-plane arrival stamp) that gascity's ledger feed and bd events
-// consume. The served roles
+// BatchCreator, Querier, ReadyCounter, VersionReconciler, the lease family
+// (Heartbeater, LeaseReclaimer, ReadyClaimer) over the claim bodies, the graph
+// roles (TreeWalker, GraphCounter, BlockingAnnotator) and BatchGetter over one
+// snapshot each, Sweeper in one transaction (a retaining sweep is refused:
+// the store keeps no id tombstones), the identity pair (Bootstrapper,
+// InitVerifier), Memories over the config keys, MoleculeStepper composed over
+// the store's own roles, the commit family as a no-op (vc.go) so bd's
+// auto-commit after each verb has nothing to refuse, and the durable events
+// journal (journal.go: the journalops.Journal read, the operator's prune and
+// activation switch, and the wisp-plane arrival stamp) that gascity's ledger
+// feed and bd events consume. Every issueops role accessor the storage
+// interface publishes is served. The served roles
 // run the conformance package's role contracts (roles_contract_test.go); the
 // contracts' scalar SQL reads are answered by a test-only responder that
 // projects the key space into the tables they name (rolekit_test.go).
 // Everything else — version control, history, remotes, sync, federation,
-// compaction, the roles only bd calls — answers
+// compaction — answers
 // *storage.ErrUnsupported through the generated shell in unsupported_gen.go
 // and is declared through RunUnsupportedContract.
 //
