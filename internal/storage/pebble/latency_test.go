@@ -3,7 +3,9 @@ package pebble
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"testing"
@@ -59,7 +61,8 @@ func TestOpWriteLatency(t *testing.T) {
 		batch = batch[:0]
 	}
 	for i := 0; i < rows; i++ {
-		issue := &types.Issue{ID: fmt.Sprintf("lat-%06d", i), Title: fmt.Sprintf("row %d", i), Status: types.StatusOpen, IssueType: types.TypeTask, Priority: i % 5}
+		issue := &types.Issue{ID: fmt.Sprintf("lat-%06d", i), Title: fmt.Sprintf("row %d", i), Status: types.StatusOpen, IssueType: types.TypeTask, Priority: i % 5,
+			Labels: []string{fmt.Sprintf("lane-%d", i%10)}}
 		if i%2 == 1 {
 			issue.Dependencies = []*types.Dependency{{IssueID: issue.ID, DependsOnID: fmt.Sprintf("lat-%06d", i/2), Type: types.DepBlocks}}
 		}
@@ -125,6 +128,47 @@ func TestOpWriteLatency(t *testing.T) {
 		}
 		readyCountsD = append(readyCountsD, time.Since(start))
 	}
+	// The reads that still scan the issues namespace (search, stats, stale,
+	// epics), measured the same way so the cost of a full scan at this size
+	// is on record beside the indexed ready page.
+	open := types.StatusOpen
+	scanReads := []struct {
+		name string
+		run  func() error
+		d    []time.Duration
+	}{
+		{"list open, limit 50, with deps (bd list / Reader.List)", func() error {
+			_, err := s.SearchIssues(ctx, "", types.IssueFilter{Status: &open, Limit: 50, IncludeDependencies: true})
+			return err
+		}, nil},
+		{"list ids, status open (hydration-free)", func() error {
+			_, err := s.SearchIssueIDs(ctx, "", types.IssueFilter{Status: &open})
+			return err
+		}, nil},
+		{"list by label, limit 50", func() error {
+			_, err := s.SearchIssues(ctx, "", types.IssueFilter{Labels: []string{"lane-3"}, Limit: 50})
+			return err
+		}, nil},
+		{"text query 'row 123', limit 50", func() error {
+			_, err := s.SearchIssues(ctx, "row 123", types.IssueFilter{Limit: 50})
+			return err
+		}, nil},
+		{"statistics", func() error { _, err := s.GetStatistics(ctx); return err }, nil},
+		{"stale (30 days)", func() error {
+			_, err := s.GetStaleIssues(ctx, types.StaleFilter{Days: 30})
+			return err
+		}, nil},
+		{"epics eligible for closure", func() error { _, err := s.GetEpicsEligibleForClosure(ctx); return err }, nil},
+	}
+	for i := range scanReads {
+		for n := 0; n < 10; n++ {
+			start := time.Now()
+			if err := scanReads[i].run(); err != nil {
+				t.Fatalf("%s: %v", scanReads[i].name, err)
+			}
+			scanReads[i].d = append(scanReads[i].d, time.Since(start))
+		}
+	}
 	t.Logf("backdrop: %d rows, %d edges; %d ops; in-memory=%v journal=%v", rows, rows/2, ops, os.Getenv("BEADS_PEBBLE_LATENCY_MEM") != "", journal)
 	for _, m := range []struct {
 		name string
@@ -132,7 +176,51 @@ func TestOpWriteLatency(t *testing.T) {
 	}{{"create (Lifecycle, no-history wisp, pinned id)", createD}, {"close (Lifecycle.Update, fenced)", closeD},
 		{"edge add (related)", edgeAddD}, {"edge remove", edgeRmD}, {"ready (limit 50)", readyD},
 		{"ready with counts and total (limit 50)", readyCountsD}} {
-		t.Logf("%-48s %s", m.name, summarize(m.d))
+		t.Logf("%-56s %s", m.name, summarize(m.d))
+	}
+	for _, m := range scanReads {
+		t.Logf("%-56s %s", m.name, summarize(m.d))
+	}
+	// Logical size by key namespace: what the rows cost against what the
+	// derived indexes cost, as key+value bytes before Pebble's compression.
+	sizes := map[string][2]int64{}
+	var order []string
+	err = s.read(func(r kv) error {
+		return r.scan(nil, func(k, v []byte) (bool, error) {
+			ns := string(k[:1])
+			if _, seen := sizes[ns]; !seen {
+				order = append(order, ns)
+			}
+			e := sizes[ns]
+			e[0]++
+			e[1] += int64(len(k) + len(v))
+			sizes[ns] = e
+			return true, nil
+		})
+	})
+	if err != nil {
+		t.Fatalf("size scan: %v", err)
+	}
+	sort.Strings(order)
+	var total int64
+	for _, ns := range order {
+		total += sizes[ns][1]
+	}
+	for _, ns := range order {
+		e := sizes[ns]
+		t.Logf("namespace %-3s keys=%-7d bytes=%-10d (%.1f%%)", ns, e[0], e[1], 100*float64(e[1])/float64(total))
+	}
+	if dir := s.Dir(); dir != "" {
+		var onDisk int64
+		_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() {
+				if info, err := d.Info(); err == nil {
+					onDisk += info.Size()
+				}
+			}
+			return nil
+		})
+		t.Logf("logical bytes=%d on-disk bytes=%d", total, onDisk)
 	}
 }
 
