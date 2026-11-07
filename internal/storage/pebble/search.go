@@ -15,12 +15,13 @@ import (
 	"github.com/steveyegge/beads/internal/types"
 )
 
-// Search is a full scan filtered in process to the predicate
+// Search filters rows in process to the predicate
 // sqlbuild.BuildIssueFilterClauses renders for the SQL backends, ordered by
 // the comparator the SQL ORDER BY and the issues+wisps merge share
 // (sqlbuild.Less), and bounded the way issueops.searchInTx bounds a page:
 // each leg to EffectiveSearchLimit, the merged set to Limit, then the MaxRows
-// cap. Both planes live in one table here, so the merge is the scan itself:
+// cap. A bounded page in an order the O index serves is read through the
+// index and stops when it is full (orderindex.go); anything else is a scan. Both planes live in one table here, so the merge is the scan itself:
 // SkipWisps drops the wisps-plane rows, Ephemeral=true keeps only ephemeral
 // rows (the wisps-table route), and nothing can appear twice.
 
@@ -523,10 +524,6 @@ func hydrateSearchIssue(r kv, rec *issueRecord, filter types.IssueFilter) (*type
 	return issue, nil
 }
 
-func sortIssues(issues []*types.Issue, sortBy string, sortDesc bool) {
-	stableSortBy(issues, func(a, b *types.Issue) bool { return sqlbuild.Less(a, b, sortBy, sortDesc) })
-}
-
 // boundSearch applies the page bound issueops.searchInTx applies on every
 // exit path: the per-leg EffectiveSearchLimit, the Limit trim, then the
 // MaxRows cap on the delivered count (*issueops.ErrTooManyRows).
@@ -544,9 +541,11 @@ func boundSearch[T any](items []T, filter types.IssueFilter) ([]T, error) {
 }
 
 // searchIssues is the SearchIssues body over r: the shared read the store
-// and a transaction both run.
+// and a transaction both run. The page is cut before it is hydrated: the
+// sort reads stored fields only, so the lease read and the edge scan each
+// delivered row costs are paid for the page, not for every match.
 func searchIssues(r kv, query string, filter types.IssueFilter) ([]*types.Issue, error) {
-	recs, err := searchRecords(r, query, filter)
+	recs, err := searchPage(r, query, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -558,29 +557,19 @@ func searchIssues(r kv, query string, filter types.IssueFilter) ([]*types.Issue,
 		}
 		issues = append(issues, issue)
 	}
-	sortIssues(issues, filter.SortBy, filter.SortDesc)
-	return boundSearch(issues, filter)
+	return issues, nil
 }
 
 // searchIssueIDs is the id projection of searchIssues: the same rows in the
 // same order, as bare ids.
 func searchIssueIDs(r kv, query string, filter types.IssueFilter) ([]string, error) {
-	recs, err := searchRecords(r, query, filter)
+	recs, err := searchPage(r, query, filter)
 	if err != nil {
 		return nil, err
 	}
-	issues := make([]*types.Issue, 0, len(recs))
+	ids := make([]string, 0, len(recs))
 	for _, rec := range recs {
-		issues = append(issues, &rec.Issue)
-	}
-	sortIssues(issues, filter.SortBy, filter.SortDesc)
-	issues, err = boundSearch(issues, filter)
-	if err != nil {
-		return nil, err
-	}
-	ids := make([]string, 0, len(issues))
-	for _, i := range issues {
-		ids = append(ids, i.ID)
+		ids = append(ids, rec.Issue.ID)
 	}
 	return ids, nil
 }
@@ -681,7 +670,7 @@ func countIssuesByGroup(r kv, filter types.IssueFilter, groupBy string) (map[str
 // searchIssuesWithCounts is SearchIssuesWithCounts over r: the search page
 // hydrated with the counts the SQL mega-query computes (withCounts).
 func searchIssuesWithCounts(r kv, query string, filter types.IssueFilter) ([]*types.IssueWithCounts, error) {
-	recs, err := searchRecords(r, query, filter)
+	recs, err := searchPage(r, query, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -694,8 +683,7 @@ func searchIssuesWithCounts(r kv, query string, filter types.IssueFilter) ([]*ty
 		}
 		items = append(items, iwc)
 	}
-	sortIssuesWithCounts(items, func(a, b *types.Issue) bool { return sqlbuild.Less(a, b, filter.SortBy, filter.SortDesc) })
-	return boundSearch(items, filter)
+	return items, nil
 }
 
 // --- Store surface ------------------------------------------------------------

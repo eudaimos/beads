@@ -52,7 +52,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   history-count clauses skipped by name. The storage tree's contract-leg
   registry holds the pebble leg to the role tier under an adoption ceiling that falls
   as roles land (now 141, every remaining entry a role the generated shell no longer
-  answers for or a contract outside the role tier). Pebble's zstd is built on its pure-Go path
+  answers for or a contract outside the role tier). The list page, the statistics, the
+  stale read and the epic-closure read no longer scan the rows: a row-order index
+  (plane, priority, created, id) serves the default list sort and the created sort as a
+  bounded merge, an updated-order index per status serves the stale read below its cutoff,
+  a type index serves the open epics, and the statistics are counters every write
+  maintains; all four are rebuilt on open with the ready index, and a randomized test
+  holds each to its scan definition. The search body now cuts the page before it hydrates
+  it (the sort reads stored fields only), so a limited list over a large open set pays the
+  lease read and edge scan for the page rather than for every match. Ids are minted the way
+  the SQL backends mint them: the hash length follows the row count under the prefix
+  (three characters on an empty workspace), a wisp takes the `-wisp` prefix, and
+  `issue_id_mode=counter` gives durable rows sequential ids per prefix, seeded past the
+  highest numeric suffix present. Pebble's zstd is built on its pure-Go path
   (`pebblegozstd`, applied in `.bazelrc`, a gazelle override and the Makefile tags)
   because its cgo path bundles the libzstd symbols Dolt's gozstd already bundles.
   The durable events journal is served (`storage.EventsJournalConfigurer`,

@@ -72,11 +72,23 @@
 //	                            admits, read only as far as the page needs.
 //	B/<id>                      "" (open rows whose blocked flag is set)
 //	F/<defer_until>/<id>        "" (rows with a defer_until)
+//	O/<plane>/<pri>/<created>/<id>
+//	                            "" (every row; a list page in the default
+//	                            priority sort or the created sort is a merge
+//	                            of the (plane, priority) groups, read only as
+//	                            far as the page needs)
+//	U/<status>/<updated>/<id>   "" (durable, non-ephemeral rows: the stale
+//	                            read's population in its order)
+//	T/<type>/<id>               "" (durable rows not closed, by type)
+//	S/<counter>                 the statistics counts over the durable plane
 //	z/<name>                    store-internal markers (index version)
 //
-// The derived indexes (R, B, F) are maintained by putRecord from the row's
-// previous and new state and rebuilt on open when the store predates them;
-// see readyindex.go.
+// The derived indexes (R, B, F, O, U, T) and the counters (S) are maintained
+// by putRecord from the row's previous and new state and rebuilt on open when
+// the store predates them; see readyindex.go and rowindex.go. The id of a
+// create that names none is minted the way the SQL backends mint it: a
+// content hash at the adaptive length, or the prefix's next counter value
+// under issue_id_mode=counter (issues.go).
 //
 // # Concurrency and transactions
 //

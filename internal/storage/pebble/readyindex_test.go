@@ -208,12 +208,28 @@ func TestReadyIndexRebuilt(t *testing.T) {
 	if err := s.SetConfig(ctx, "issue_prefix", "rdy"); err != nil {
 		t.Fatal(err)
 	}
-	seedReadyGraph(t, s, 120, 2)
+	seedRowGraph(t, s, 120, 2)
 	want, err := s.GetReadyWork(ctx, types.WorkFilter{Limit: 20})
 	if err != nil {
 		t.Fatal(err)
 	}
 	blockedWant, err := s.GetBlockedIssues(ctx, types.WorkFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	statsWant, err := s.GetStatistics(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listWant, err := s.SearchIssueIDs(ctx, "", types.IssueFilter{SortBy: "created", Limit: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleWant, err := s.GetStaleIssues(ctx, types.StaleFilter{Days: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	epicsWant, err := s.GetEpicsEligibleForClosure(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -226,7 +242,7 @@ func TestReadyIndexRebuilt(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := dbKV{db: db}
-	for _, ns := range []string{nsReady, nsBlocked, nsDefer} {
+	for _, ns := range derivedNamespaces {
 		if err := deletePrefix(raw, []byte(ns)); err != nil {
 			t.Fatal(err)
 		}
@@ -261,5 +277,33 @@ func TestReadyIndexRebuilt(t *testing.T) {
 	}
 	if len(blockedGot) != len(blockedWant) {
 		t.Fatalf("blocked after rebuild: %d rows, want %d", len(blockedGot), len(blockedWant))
+	}
+	statsGot, err := s.GetStatistics(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statsString(statsGot) != statsString(statsWant) || statsWant.TotalIssues == 0 {
+		t.Fatalf("statistics after rebuild: %s, want %s", statsString(statsGot), statsString(statsWant))
+	}
+	listGot, err := s.SearchIssueIDs(ctx, "", types.IssueFilter{SortBy: "created", Limit: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(listGot) != fmt.Sprint(listWant) || len(listWant) != 30 {
+		t.Fatalf("list after rebuild:\n %v\n want %v", listGot, listWant)
+	}
+	staleGot, err := s.GetStaleIssues(ctx, types.StaleFilter{Days: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(issueIDs(staleGot)) != fmt.Sprint(issueIDs(staleWant)) || len(staleWant) == 0 {
+		t.Fatalf("stale after rebuild: %v, want %v", issueIDs(staleGot), issueIDs(staleWant))
+	}
+	epicsGot, err := s.GetEpicsEligibleForClosure(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(epicsGot) != len(epicsWant) || len(epicsWant) == 0 {
+		t.Fatalf("epics after rebuild: %d, want %d", len(epicsGot), len(epicsWant))
 	}
 }

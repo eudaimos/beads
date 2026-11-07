@@ -36,6 +36,10 @@ const (
 	nsDefer     = "F/"
 	nsInternal  = "z/"
 	nsJournal   = "J/"
+	nsOrder     = "O/"
+	nsUpdated   = "U/"
+	nsType      = "T/"
+	nsStats     = "S/"
 )
 
 func issueKey(id string) []byte          { return []byte(nsIssue + id) }

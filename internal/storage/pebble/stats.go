@@ -3,18 +3,63 @@ package pebble
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/cockroachdb/pebble/v2"
 
 	"github.com/steveyegge/beads/internal/types"
 )
 
 // Statistics, stale issues, epic closure and molecule rollups: the
 // issueops bodies (statistics.go, stale.go, epic_closure.go, molecule.go,
-// compaction.go) over a scan. Where those read the issues table alone, only
-// durable-plane rows count here.
+// compaction.go). Where those read the issues table alone, only
+// durable-plane rows count here. Statistics, stale and the epic read are
+// served from the counters and row-order indexes of rowindex.go; each keeps
+// its scan form beside it as the definition the indexed form is tested
+// against.
 
 // statistics is issueops.ScanIssueCountsInTx over the durable plane, plus
-// the blocked count and the clamped ready count when withBlocked is set.
+// the blocked count and the clamped ready count when withBlocked is set,
+// read from the counters every write maintains (rowindex.go).
 func statistics(r kv, withBlocked bool) (*types.Statistics, error) {
+	stats := &types.Statistics{}
+	var err error
+	read := func(name string) int {
+		if err != nil {
+			return 0
+		}
+		var n int64
+		n, err = readStat(r, name)
+		return int(n)
+	}
+	stats.TotalIssues = read(statTotal)
+	stats.OpenIssues = read(statStatus + string(types.StatusOpen))
+	stats.InProgressIssues = read(statStatus + string(types.StatusInProgress))
+	stats.ClosedIssues = read(statStatus + string(types.StatusClosed))
+	stats.DeferredIssues = read(statStatus + string(types.StatusDeferred))
+	stats.PinnedIssues = read(statPinned)
+	stats.GateIssues = read(statGate)
+	stats.TemplateIssues = read(statTemplate)
+	blocked := read(statBlocked)
+	if err != nil {
+		return nil, fmt.Errorf("get statistics: %w", err)
+	}
+	if withBlocked {
+		stats.BlockedIssues = &blocked
+		ready := stats.OpenIssues - blocked
+		if ready < 0 {
+			ready = 0
+		}
+		stats.ReadyIssues = &ready
+	}
+	return stats, nil
+}
+
+// statisticsByScan is statistics computed from the rows, the definition the
+// counters are checked against (TestRowIndexesMatchScan).
+func statisticsByScan(r kv, withBlocked bool) (*types.Statistics, error) {
 	stats := &types.Statistics{}
 	blocked := 0
 	err := scanRecords(r, func(rec *issueRecord) (bool, error) {
@@ -85,11 +130,122 @@ func (s *Store) GetStatisticsNoBlocked(ctx context.Context) (*types.Statistics, 
 	return out, err
 }
 
+// staleStatuses is the status set a stale read covers: the one asked for,
+// else open and in_progress.
+func staleStatuses(filter types.StaleFilter) []types.Status {
+	if filter.Status != "" {
+		return []types.Status{types.Status(filter.Status)}
+	}
+	return []types.Status{types.StatusOpen, types.StatusInProgress}
+}
+
+// staleAdmits is the part of the stale predicate the U key does not decide:
+// the label sets and the lease heartbeat. The plane, the ephemeral flag,
+// the status and the cutoff are the key's.
+func staleAdmits(r kv, rec *issueRecord, filter types.StaleFilter, cutoff time.Time) (bool, error) {
+	i := &rec.Issue
+	if !labelSetMatches(i.Labels, filter.Labels, filter.LabelsAny, filter.ExcludeLabels) {
+		return false, nil
+	}
+	l, err := getLease(r, i.ID)
+	if err != nil {
+		return false, err
+	}
+	return l == nil || l.HeartbeatAt.Before(cutoff), nil
+}
+
 // staleIssues is issueops.GetStaleIssuesInTx over r: durable, non-ephemeral
 // rows not updated since the cutoff, in the given status (open and
 // in_progress by default), with no lease heartbeat since the cutoff, stalest
-// first.
+// first. It reads the U index below the cutoff for each status and merges
+// the streams in (updated_at, id) order, loading rows as it goes, so the
+// page stops when Limit is reached.
 func staleIssues(r kv, filter types.StaleFilter) ([]*types.Issue, error) {
+	cutoff := nowUTC().AddDate(0, 0, -filter.Days)
+	bound := nanosString(unixNanos(cutoff))
+	statuses := staleStatuses(filter)
+	streams := make([]*pebble.Iterator, 0, len(statuses))
+	defer func() {
+		for _, it := range streams {
+			_ = it.Close()
+		}
+	}()
+	for _, st := range statuses {
+		prefix := updatedStatusPrefix(st)
+		it, err := r.iter(prefix, append(append([]byte(nil), prefix...), bound...))
+		if err != nil {
+			return nil, fmt.Errorf("get stale issues: %w", err)
+		}
+		it.First()
+		streams = append(streams, it)
+	}
+	type head struct {
+		updated int64
+		id      string
+	}
+	parse := func(it *pebble.Iterator) (head, bool) {
+		parts := splitKey(nsUpdated, it.Key())
+		if len(parts) != 3 {
+			return head{}, false
+		}
+		n, _ := strconv.ParseInt(strings.TrimLeft(parts[1], "0"), 10, 64)
+		return head{updated: n, id: parts[2]}, true
+	}
+	var recs []*issueRecord
+	for filter.Limit <= 0 || len(recs) < filter.Limit {
+		var best *pebble.Iterator
+		var bestHead head
+		for _, it := range streams {
+			for it.Valid() {
+				if _, ok := parse(it); ok {
+					break
+				}
+				it.Next()
+			}
+			if err := it.Error(); err != nil {
+				return nil, fmt.Errorf("get stale issues: %w", err)
+			}
+			if !it.Valid() {
+				continue
+			}
+			h, _ := parse(it)
+			if best == nil || h.updated < bestHead.updated || (h.updated == bestHead.updated && h.id < bestHead.id) {
+				best, bestHead = it, h
+			}
+		}
+		if best == nil {
+			break
+		}
+		best.Next()
+		rec, err := getRecord(r, bestHead.id)
+		if err != nil {
+			if isNotFound(err) {
+				continue
+			}
+			return nil, fmt.Errorf("get stale issues: %w", err)
+		}
+		ok, err := staleAdmits(r, rec, filter, cutoff)
+		if err != nil {
+			return nil, fmt.Errorf("get stale issues: %w", err)
+		}
+		if ok {
+			recs = append(recs, rec)
+		}
+	}
+	out := make([]*types.Issue, 0, len(recs))
+	for _, rec := range recs {
+		issue := rec.toIssue()
+		if err := projectLease(r, issue); err != nil {
+			return nil, fmt.Errorf("get stale issues: lease %s: %w", issue.ID, err)
+		}
+		out = append(out, issue)
+	}
+	return out, nil
+}
+
+// staleIssuesByScan is staleIssues over a scan of the rows, the definition
+// the indexed read is checked against (TestRowIndexesMatchScan).
+func staleIssuesByScan(r kv, filter types.StaleFilter) ([]*types.Issue, error) {
 	cutoff := nowUTC().AddDate(0, 0, -filter.Days)
 	var recs []*issueRecord
 	err := scanRecords(r, func(rec *issueRecord) (bool, error) {
@@ -104,15 +260,9 @@ func staleIssues(r kv, filter types.StaleFilter) ([]*types.Issue, error) {
 		} else if i.Status != types.StatusOpen && i.Status != types.StatusInProgress {
 			return true, nil
 		}
-		if !labelSetMatches(i.Labels, filter.Labels, filter.LabelsAny, filter.ExcludeLabels) {
-			return true, nil
-		}
-		l, err := getLease(r, i.ID)
-		if err != nil {
-			return false, err
-		}
-		if l != nil && !l.HeartbeatAt.Before(cutoff) {
-			return true, nil
+		ok, err := staleAdmits(r, rec, filter, cutoff)
+		if err != nil || !ok {
+			return err == nil, err
 		}
 		recs = append(recs, rec)
 		return true, nil
@@ -156,6 +306,40 @@ func (s *Store) GetStaleIssues(ctx context.Context, filter types.StaleFilter) ([
 // every open durable epic with at least one parent-child child, eligible
 // when every child is closed for a completing reason.
 func epicsEligibleForClosure(r kv) ([]*types.EpicStatus, error) {
+	epics, err := openEpics(r)
+	if err != nil {
+		return nil, fmt.Errorf("get epics eligible for closure: %w", err)
+	}
+	return epicClosureStatus(r, epics)
+}
+
+// openEpics reads the durable epics not closed, in id order, from the type
+// index.
+func openEpics(r kv) ([]*issueRecord, error) {
+	var epics []*issueRecord
+	err := r.scan(typePrefix(types.TypeEpic), func(k, _ []byte) (bool, error) {
+		parts := splitKey(nsType, k)
+		if len(parts) != 2 {
+			return true, nil
+		}
+		rec, err := getRecord(r, parts[1])
+		if err != nil {
+			if isNotFound(err) {
+				return true, nil
+			}
+			return false, err
+		}
+		if rec.Plane == planeIssues && rec.Issue.IssueType == types.TypeEpic && rec.Issue.Status != types.StatusClosed {
+			epics = append(epics, rec)
+		}
+		return true, nil
+	})
+	return epics, err
+}
+
+// openEpicsByScan is openEpics over a scan of the rows, the definition the
+// index is checked against (TestRowIndexesMatchScan).
+func openEpicsByScan(r kv) ([]*issueRecord, error) {
 	var epics []*issueRecord
 	err := scanRecords(r, func(rec *issueRecord) (bool, error) {
 		if rec.Plane == planeIssues && rec.Issue.IssueType == types.TypeEpic && rec.Issue.Status != types.StatusClosed {
@@ -163,9 +347,11 @@ func epicsEligibleForClosure(r kv) ([]*types.EpicStatus, error) {
 		}
 		return true, nil
 	})
-	if err != nil {
-		return nil, fmt.Errorf("get epics eligible for closure: %w", err)
-	}
+	return epics, err
+}
+
+// epicClosureStatus is the per-epic half of issueops.GetEpicsEligibleForClosureInTx.
+func epicClosureStatus(r kv, epics []*issueRecord) ([]*types.EpicStatus, error) {
 	var results []*types.EpicStatus
 	for _, epic := range epics {
 		children, err := childrenOf(r, epic.Issue.ID)

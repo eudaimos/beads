@@ -191,24 +191,47 @@ func (t *txn) persistCreateDependencies(issues []*types.Issue, actor string, opt
 }
 
 // mintID generates an id for a create without one, the way the SQL backends
-// do: the configured prefix (or the issue's override) and a content hash of
-// growing length until it is free.
+// do (issueops.assignCreateIssueIDInTx and GenerateIssueIDInTable): the
+// prefix is the issue's override, else the configured prefix extended by the
+// issue's sub-prefix or, for a wisp, by "-wisp"; a durable row under
+// issue_id_mode=counter takes the prefix's next counter value; anything else
+// takes a content hash at the adaptive length, grown until it is free.
 func (t *txn) mintID(issue *types.Issue, actor string) (string, error) {
-	prefix := issue.PrefixOverride
-	if prefix == "" {
-		cfg, err := getConfig(t.kv, "issue_prefix")
-		if err != nil {
-			return "", err
-		}
-		prefix = cfg
-		if issue.IDPrefix != "" {
-			prefix = prefix + "-" + issue.IDPrefix
-		}
+	configPrefix, err := getConfig(t.kv, "issue_prefix")
+	if err != nil {
+		return "", err
+	}
+	wisp := storageissueops.IsWisp(issue)
+	prefix := configPrefix
+	switch {
+	case issue.PrefixOverride != "":
+		prefix = issue.PrefixOverride
+	case issue.IDPrefix != "":
+		prefix = configPrefix + "-" + issue.IDPrefix
+	case wisp:
+		prefix = configPrefix + "-wisp"
 	}
 	if prefix == "" {
 		return "", fmt.Errorf("%w: issue_prefix is not configured and the issue has no id", storage.ErrNotInitialized)
 	}
-	for length := 6; length <= 8; length++ {
+	if !wisp {
+		mode, err := getConfig(t.kv, "issue_id_mode")
+		if err != nil {
+			return "", err
+		}
+		if mode == "counter" {
+			return t.nextCounterID(prefix)
+		}
+	}
+	baseLength, err := adaptiveIDLength(t.kv, prefix)
+	if err != nil {
+		return "", err
+	}
+	const maxLength = 8
+	if baseLength > maxLength {
+		baseLength = maxLength
+	}
+	for length := baseLength; length <= maxLength; length++ {
 		for nonce := 0; nonce < 10; nonce++ {
 			candidate := idgen.GenerateHashID(prefix, issue.Title, issue.Description, actor, issue.CreatedAt, length, nonce)
 			if t.claimedIDs[candidate] {
@@ -221,7 +244,120 @@ func (t *txn) mintID(issue *types.Issue, actor string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("failed to generate a unique id for prefix %q", prefix)
+	return "", fmt.Errorf("failed to generate unique ID after trying lengths %d-%d with 10 nonces each", baseLength, maxLength)
+}
+
+// maxCounterIDSkips bounds how many occupied or claimed counter values one
+// create walks past (issueops.maxRetiredCounterSkips).
+const maxCounterIDSkips = 1000
+
+// nextCounterID is issueops.NextCounterIDTx over the key space: the
+// prefix's counter, seeded on first use from the highest numeric suffix a
+// top-level row under the prefix already carries, advanced past the values
+// the batch has claimed or a pinned row occupies. The counter only ever
+// advances, so a skipped value is never offered again.
+func (t *txn) nextCounterID(prefix string) (string, error) {
+	name := "counter" + sep + prefix
+	if _, seeded, err := t.kv.get(seqKey(name)); err != nil {
+		return "", err
+	} else if !seeded {
+		high, err := highestCounterSuffix(t.kv, prefix)
+		if err != nil {
+			return "", err
+		}
+		if high > 0 {
+			if err := t.kv.set(seqKey(name), []byte(strconv.Itoa(high))); err != nil {
+				return "", err
+			}
+		}
+	}
+	for skips := 0; ; skips++ {
+		n, err := nextSeq(t.kv, name)
+		if err != nil {
+			return "", err
+		}
+		candidate := fmt.Sprintf("%s-%d", prefix, n)
+		if !t.claimedIDs[candidate] {
+			taken, err := recordExists(t.kv, candidate)
+			if err != nil {
+				return "", err
+			}
+			if !taken {
+				return candidate, nil
+			}
+		}
+		if skips >= maxCounterIDSkips {
+			return "", fmt.Errorf("issue counter for prefix %q walked past %d occupied or claimed ids without finding a free one", prefix, maxCounterIDSkips)
+		}
+	}
+}
+
+// topLevelIDs calls fn with the suffix of every row id of the form
+// <prefix>-<suffix> whose suffix carries no dot (a child id), reading keys
+// only, until fn returns false.
+func topLevelIDs(r kv, prefix string, fn func(suffix string) bool) error {
+	lead := nsIssue + prefix + "-"
+	return r.scan([]byte(lead), func(k, _ []byte) (bool, error) {
+		suffix := strings.TrimPrefix(string(k), lead)
+		if strings.Contains(suffix, ".") {
+			return true, nil
+		}
+		return fn(suffix), nil
+	})
+}
+
+// highestCounterSuffix is issueops.SeedCounterFromExistingIssuesTx's scan:
+// the largest numeric suffix among the top-level rows under prefix.
+func highestCounterSuffix(r kv, prefix string) (int, error) {
+	high := 0
+	err := topLevelIDs(r, prefix, func(suffix string) bool {
+		if n, err := strconv.Atoi(suffix); err == nil && n > high {
+			high = n
+		}
+		return true
+	})
+	return high, err
+}
+
+// adaptiveIDLength is issueops.GetAdaptiveIDLengthTx over the key space:
+// the shortest hash length whose birthday-collision probability over the
+// top-level rows under prefix stays under the configured bound. The count
+// stops once it passes the largest threshold the bound can move.
+func adaptiveIDLength(r kv, prefix string) (int, error) {
+	cfg := storageissueops.DefaultAdaptiveConfig()
+	if v, err := getConfig(r, "max_collision_prob"); err != nil {
+		return 0, err
+	} else if v != "" {
+		if prob, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.MaxCollisionProbability = prob
+		}
+	}
+	if v, err := getConfig(r, "min_hash_length"); err != nil {
+		return 0, err
+	} else if v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.MinLength = n
+		}
+	}
+	if v, err := getConfig(r, "max_hash_length"); err != nil {
+		return 0, err
+	} else if v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.MaxLength = n
+		}
+	}
+	// Past this many rows every length up to the maximum is already chosen,
+	// so the count can stop.
+	const countCeiling = 1 << 20
+	count := 0
+	err := topLevelIDs(r, prefix, func(string) bool {
+		count++
+		return count < countCeiling
+	})
+	if err != nil {
+		return 0, err
+	}
+	return storageissueops.ComputeAdaptiveLength(count, cfg), nil
 }
 
 // raiseChildCounter records that child number n exists under parent. A

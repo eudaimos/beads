@@ -14,7 +14,8 @@ import (
 
 // Derived indexes over the rows, maintained by putRecord and dropped by
 // dropRowIndexes, so the ready predicate and the blocked list never scan the
-// issues namespace:
+// issues namespace (the row-order indexes and the statistics counters are
+// in rowindex.go):
 //
 //	R/<status>/<priority>/<created>/<id>   ready candidate: open status, not
 //	                                       pinned, not effectively blocked.
@@ -29,8 +30,12 @@ import (
 // age). Rows the index cannot decide (labels, metadata) are loaded on demand.
 
 // indexVersion is stamped at z/indexes; a store without it (or an older one)
-// is rebuilt on open.
-const indexVersion = "1"
+// is rebuilt on open. Version 2 added the row-order indexes and the
+// statistics counters (rowindex.go).
+const indexVersion = "2"
+
+// derivedNamespaces lists every namespace rebuildIndexes clears and refills.
+var derivedNamespaces = []string{nsReady, nsBlocked, nsDefer, nsOrder, nsUpdated, nsType, nsStats}
 
 // readyEntry is one candidate-index entry: the sort fields from its key and
 // the cheap filter fields from its value, plus the row once it is loaded.
@@ -155,7 +160,7 @@ func putDerivedIndexes(w kv, old, rec *issueRecord) error {
 			}
 		}
 	}
-	return nil
+	return putRowIndexes(w, old, rec)
 }
 
 func dropDerivedIndexes(w kv, rec *issueRecord) error {
@@ -167,7 +172,7 @@ func dropDerivedIndexes(w kv, rec *issueRecord) error {
 			return err
 		}
 	}
-	return nil
+	return dropRowIndexEntries(w, rec)
 }
 
 // ensureIndexes rebuilds the derived indexes when the store predates them.
@@ -191,7 +196,7 @@ func (s *Store) ensureIndexes(ctx context.Context) error {
 // from r and writing to w (a batch, which must not see its own writes while
 // the rows are scanned).
 func rebuildIndexes(r, w kv) error {
-	for _, ns := range []string{nsReady, nsBlocked, nsDefer} {
+	for _, ns := range derivedNamespaces {
 		var keys [][]byte
 		err := r.scan([]byte(ns), func(k, _ []byte) (bool, error) {
 			keys = append(keys, append([]byte(nil), k...))
