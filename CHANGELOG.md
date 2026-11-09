@@ -140,6 +140,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build constraint, so no lane carries a new tag), because its cgo path bundles the
   libzstd symbols Dolt's gozstd already bundles; a go-toolchain binary that links both
   builds with `-tags pebblegozstd`.
+- **A `bd` built with the `pebblegozstd` tag links the experimental Pebble backend.**
+  `cmd/bd/backend_pebble.go` imports `internal/storage/pebble` under that tag, so in such
+  a build a workspace whose `metadata.json` names `pebble` opens through the registry, and
+  `bd init --backend=pebble --prefix <p>` creates one at `.beads/pebble/` through the
+  registry's `Create` hook. A default build, and every released binary, is unchanged and
+  does not link Pebble: the tag is Pebble's own switch for its pure-Go zstd, which a
+  go-toolchain binary that also links Dolt needs, and no workflow or install command
+  gains it. `backend/pebble` is the public door for embedders that link beads as a
+  library. On a Pebble workspace the version-control verbs (`bd history`, `--as-of`,
+  remotes, sync, federation) are refused with an unsupported error, and the store is held
+  by one process at a time; Dolt remains the default and the only supported backend. See
+  the "Experimental: Pebble Backend" section of the architecture docs.
 - **`arrival_seq`, a commit-ordered create sequence on wisp-plane rows.**
   While a workspace journals, every `ephemeral` or `no_history` bead it creates
   is stamped with the `seq` of its own `create` journal record, in the same
