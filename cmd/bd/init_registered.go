@@ -81,10 +81,13 @@ func refuseFlagsRegisteredInitCannotHonor(cmd *cobra.Command, name string) error
 
 // registeredInitOptions is what bd init hands the registered-backend route.
 type registeredInitOptions struct {
-	name          string
-	prefix        string
-	quiet         bool
-	initIfMissing bool
+	name   string
+	prefix string
+	// prefixRequested reports that --prefix was given on the command line,
+	// as opposed to prefix being a default the route would derive anyway.
+	prefixRequested bool
+	quiet           bool
+	initIfMissing   bool
 	// keepHomeClean is guardInitInHomeDir's answer: the workspace is one the
 	// caller named under an untracked home directory, and init leaves the
 	// directory around it alone.
@@ -139,7 +142,7 @@ func runInitRegisteredBackend(ctx context.Context, opts registeredInitOptions) (
 	// An initialized workspace is answered before the gate: --init-if-missing
 	// on one is a no-op many callers make at once, and it must not queue for
 	// exclusive access behind the workspace's own commands.
-	if done, existsErr := registeredInitAnswersExisting(beadsDir, opts); done || existsErr != nil {
+	if done, existsErr := registeredInitAnswersExisting(ctx, beadsDir, opts); done || existsErr != nil {
 		return existsErr
 	}
 
@@ -157,7 +160,7 @@ func runInitRegisteredBackend(ctx context.Context, opts registeredInitOptions) (
 	defer func() { _ = gate.Release() }()
 	// Again under the gate: an init that waited for another one finds the
 	// workspace that one made.
-	if done, existsErr := registeredInitAnswersExisting(beadsDir, opts); done || existsErr != nil {
+	if done, existsErr := registeredInitAnswersExisting(ctx, beadsDir, opts); done || existsErr != nil {
 		return existsErr
 	}
 	if dataErr := checkExistingBeadsDataAt(beadsDir, prefix); dataErr != nil {
@@ -219,7 +222,11 @@ func runInitRegisteredBackend(ctx context.Context, opts registeredInitOptions) (
 // registeredInitAnswersExisting reports whether beadsDir already holds an
 // initialized workspace, and answers for it when it does: --init-if-missing
 // returns without touching it, a plain init is refused.
-func registeredInitAnswersExisting(beadsDir string, opts registeredInitOptions) (done bool, err error) {
+//
+// --init-if-missing with a --prefix the workspace does not have is refused
+// too, as the Dolt route refuses it (resolveInitIfMissingAlreadyInitialized):
+// skipping would report success for a prefix the caller did not get.
+func registeredInitAnswersExisting(ctx context.Context, beadsDir string, opts registeredInitOptions) (done bool, err error) {
 	existing, loadErr := configfile.LoadForDiscovery(beadsDir)
 	if loadErr != nil {
 		return true, fmt.Errorf("failed to load %s: %w", configfile.ConfigPath(beadsDir), loadErr)
@@ -228,12 +235,56 @@ func registeredInitAnswersExisting(beadsDir string, opts registeredInitOptions) 
 		return false, nil
 	}
 	if opts.initIfMissing {
+		if opts.prefixRequested {
+			if stored, mismatch := existingWorkspacePrefixMismatch(ctx, beadsDir, existing, opts.prefix); mismatch {
+				return true, fmt.Errorf("workspace already initialized with %s, but --prefix %q was requested.\nRemove --prefix (or pass a matching value) to reuse the existing workspace", stored, opts.prefix)
+			}
+		}
 		if !opts.quiet {
 			fmt.Printf("  %s Workspace already initialized at %s (backend %q)\n", ui.RenderPass("✓"), beadsDir, existing.GetBackend())
 		}
 		return true, nil
 	}
 	return true, alreadyInitialized("beads workspace already exists at %s (backend %q); use bd commands normally, or move it aside before initializing again", beadsDir, existing.GetBackend())
+}
+
+// existingWorkspacePrefixMismatch reports whether the initialized workspace
+// at beadsDir was given a prefix other than requested, the raw --prefix
+// value, and names what it has instead for the refusal.
+//
+// A workspace on a registered backend keeps its prefix in its store, so the
+// store is opened read-only and asked. The comparison is exact, on the value
+// init would have written (normalizeIssuePrefix). A Dolt workspace is compared
+// the way the Dolt route compares it, by the database name its metadata
+// records.
+//
+// A prefix that cannot be read is not a mismatch, the rule
+// initIfMissingPrefixMismatch has for an unknown database name:
+// --init-if-missing is the call many processes make at once, and a store
+// another one holds open may refuse a second open. That must not turn the
+// no-op into a failure.
+func existingWorkspacePrefixMismatch(ctx context.Context, beadsDir string, existing *configfile.Config, requested string) (stored string, mismatch bool) {
+	want := normalizeIssuePrefix(requested)
+	if want == "" {
+		return "", false
+	}
+	name := existing.GetBackend()
+	if !backends.Registered(name) {
+		if initIfMissingPrefixMismatch(existing.DoltDatabase, requested) {
+			return fmt.Sprintf("database %q", existing.DoltDatabase), true
+		}
+		return "", false
+	}
+	store, openErr := newRegisteredBackendStore(ctx, name, beadsDir, true, false)
+	if openErr != nil {
+		return "", false
+	}
+	have, readErr := store.GetConfig(ctx, "issue_prefix")
+	_ = store.Close()
+	if readErr != nil || have == "" || have == want {
+		return "", false
+	}
+	return fmt.Sprintf("issue prefix %q", have), true
 }
 
 // seedRegisteredWorkspace writes the issue prefix and the workspace identity
