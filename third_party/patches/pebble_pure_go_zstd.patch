@@ -1,0 +1,12 @@
+diff -ruN a/internal/compression/zstd_nocgo.go b/internal/compression/zstd_nocgo.go
+--- a/internal/compression/zstd_nocgo.go	2026-11-09 00:54:04
++++ b/internal/compression/zstd_nocgo.go	2026-11-09 00:54:04
+@@ -2,8 +2,6 @@
+ // of this source code is governed by a BSD-style license that can be found in
+ // the LICENSE file.
+ 
+-//go:build !cgo || pebblegozstd
+-
+ package compression
+ 
+ import (

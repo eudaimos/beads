@@ -125,6 +125,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for any registrant that only opens workspaces something else created. This
   is the init half of the backend seam GH#4547 describes; the Dolt init path
   is untouched.
+- **An experimental `pebble` storage backend, as a package.** `internal/storage/pebble`
+  implements the storage interface on CockroachDB's Pebble, a pure-Go key-value engine,
+  and registers under the name `pebble` with the registry's `Create` hook: one Pebble
+  database under `.beads/pebble/`, single-writer transactions over an indexed batch, the
+  blocked-state rule computed in process over the affected neighborhood, and derived
+  indexes that make the ready page, the list page, the statistics, the stale read and the
+  epic-closure read bounded by the page rather than the store (rebuilt on open when the
+  store predates them). Ids are minted the way the SQL backends mint them: adaptive-length
+  hash, `-wisp` prefix, `issue_id_mode=counter`. Every issueops role accessor the storage
+  interface publishes is served and runs the conformance package's role contract; the
+  portable conformance suite passes in full; the durable events journal is served.
+  Version control, history, remotes, sync, federation and compaction answer
+  `*storage.ErrUnsupported`. The store directory ignores itself in git. Nothing imports the package yet, so `bd` does not reach it;
+  `engdocs/design/pebble-backend.md` is the design note. Under Bazel, Pebble's zstd is
+  built on its pure-Go path in every configuration (a module patch removes that file's
+  build constraint, so no lane carries a new tag), because its cgo path bundles the
+  libzstd symbols Dolt's gozstd already bundles; a go-toolchain binary that links both
+  builds with `-tags pebblegozstd`.
 - **`arrival_seq`, a commit-ordered create sequence on wisp-plane rows.**
   While a workspace journals, every `ephemeral` or `no_history` bead it creates
   is stamped with the `seq` of its own `create` journal record, in the same

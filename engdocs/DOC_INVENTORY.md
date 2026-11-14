@@ -77,6 +77,7 @@ Follow-up automation should replace marker-only checks with generated or
 | `design/bd-serve-v0.md` | Keep | `bd serve` v0 contract and the decisions behind it; defers to `internal/httpapi/spec/openapi.v0.yaml`, `internal/httpapi/doc.go` and `issueops/reader.go` as sources of truth. |
 | `design/dolt-concurrency.md` | Keep | Design note for Dolt concurrency. |
 | `design/kv-store.md` | Keep | Draft design note; retain as design seam, not user reference. |
+| `design/pebble-backend.md` | Keep | Design note for the experimental Pebble key-value backend: why, the three layers it landed in, how it is proven, what it does not do. |
 | `design/otel/otel-architecture.md` | Keep | Architecture/design doc for telemetry; reference tables should defer to data model. |
 | `design/otel/otel-data-model.md` | Keep with freshness | Reference schema; reviewed against telemetry and emission code. |
 | `DOC_INVENTORY.md` | Keep | This disposition and seam inventory. |
