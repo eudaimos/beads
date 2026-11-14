@@ -817,11 +817,12 @@ Non-interactive mode (--non-interactive or BD_NON_INTERACTIVE=1):
 				return err
 			}
 			return runInitRegisteredBackend(cmd.Context(), registeredInitOptions{
-				name:          backendFlag,
-				prefix:        prefix,
-				quiet:         quiet,
-				initIfMissing: initIfMissing,
-				keepHomeClean: keepHomeClean,
+				name:            backendFlag,
+				prefix:          prefix,
+				prefixRequested: cmd.Flags().Changed("prefix"),
+				quiet:           quiet,
+				initIfMissing:   initIfMissing,
+				keepHomeClean:   keepHomeClean,
 			})
 		}
 		for _, legacyFlag := range removedBackendInitFlags {
