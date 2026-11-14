@@ -78,6 +78,11 @@ func TestInitProvisionsPebbleWorkspace(t *testing.T) {
 	if err := runRegisteredInit("--backend", pebble.BackendName, "--prefix", "pbl", "--quiet", "--init-if-missing"); err != nil {
 		t.Fatalf("bd init --init-if-missing on an initialized pebble workspace: %v", err)
 	}
+	// --init-if-missing reads the prefix the Pebble store holds: one the
+	// workspace does not have is refused, not skipped.
+	if err := runRegisteredInit("--backend", pebble.BackendName, "--prefix", "other", "--quiet", "--init-if-missing"); err == nil || !strings.Contains(err.Error(), `issue prefix "pbl"`) {
+		t.Fatalf("bd init --init-if-missing --prefix other on a pebble workspace with prefix pbl: err = %v, want a refusal naming the workspace's prefix", err)
+	}
 	// A flag the route cannot honor is refused on the real backend as on the
 	// fixture: nothing about Pebble takes --server.
 	if err := runRegisteredInit("--backend", pebble.BackendName, "--prefix", "pbl", "--quiet", "--server"); err == nil || !strings.Contains(err.Error(), "--server") {
