@@ -117,11 +117,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--skip-hooks` and `--skip-agents` (it never prompts and installs neither),
   and refuses every other `bd init` flag, and `--db`/`--database`, by name:
   `--server`, `--remote`, `--stealth` and the rest select something only the
-  Dolt route does. A registered backend without the hook is still refused by
-  name, as before, so nothing changes for the `http` backend or for any
-  registrant that only opens workspaces something else created. This is the
-  init half of the backend seam GH#4547 describes; the Dolt init path is
-  untouched.
+  Dolt route does. `--init-if-missing` skips an initialized workspace, and
+  like the Dolt route refuses a `--prefix` that workspace does not have
+  instead of reporting success for it; the prefix compared is the one the
+  workspace's store holds. A registered backend without the hook is still
+  refused by name, as before, so nothing changes for the `http` backend or
+  for any registrant that only opens workspaces something else created. This
+  is the init half of the backend seam GH#4547 describes; the Dolt init path
+  is untouched.
 - **An experimental `pebble` storage backend, as a package.** `internal/storage/pebble`
   implements the storage interface on CockroachDB's Pebble, a pure-Go key-value engine,
   and registers under the name `pebble` with the registry's `Create` hook: one Pebble

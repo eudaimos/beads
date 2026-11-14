@@ -58,7 +58,8 @@ func TestInitRejectsRegisteredBackend(t *testing.T) {
 
 // createFixtureStore is the store a creatable fixture backend opens: a nil
 // DoltStorage for identity, with the config and metadata writes bd init makes
-// on a fresh workspace, and the failures a test arms on its backend.
+// on a fresh workspace, the config read it makes on an initialized one, and
+// the failures a test arms on its backend.
 type createFixtureStore struct {
 	storage.DoltStorage
 	backend  *creatableFixture
@@ -72,7 +73,17 @@ func (s *createFixtureStore) SetConfig(_ context.Context, key, value string) err
 		return s.backend.setConfigErr
 	}
 	s.config[key] = value
+	s.backend.persisted[key] = value
 	return nil
+}
+
+// GetConfig reads what any store of the backend wrote: the fixture's config
+// outlives the store that set it, as a real backend's does.
+func (s *createFixtureStore) GetConfig(_ context.Context, key string) (string, error) {
+	if s.backend.getConfigErr != nil {
+		return "", s.backend.getConfigErr
+	}
+	return s.backend.persisted[key], nil
 }
 
 func (s *createFixtureStore) SetMetadata(_ context.Context, key, value string) error {
@@ -89,23 +100,28 @@ func (s *createFixtureStore) Close() error {
 }
 
 // creatableFixture is a registered backend with a Create hook: it records the
-// directories Create was handed and the stores Open returned, and fails
-// whichever step a test arms.
+// directories Create was handed and the stores Open and OpenReadOnly
+// returned, keeps the config written through them, and fails whichever step a
+// test arms.
 type creatableFixture struct {
-	name    string
-	created []string
-	opened  []*createFixtureStore
+	name           string
+	created        []string
+	opened         []*createFixtureStore
+	openedReadOnly []*createFixtureStore
+	persisted      map[string]string
 
-	createErr      error
-	openErr        error
-	setConfigErr   error
-	setMetadataErr error
-	closeErr       error
+	createErr       error
+	openErr         error
+	openReadOnlyErr error
+	setConfigErr    error
+	getConfigErr    error
+	setMetadataErr  error
+	closeErr        error
 }
 
 func registerCreatableFixture(t *testing.T, name string) *creatableFixture {
 	t.Helper()
-	fixture := &creatableFixture{name: name}
+	fixture := &creatableFixture{name: name, persisted: map[string]string{}}
 	backends.Register(name, backends.Backend{
 		Open: func(context.Context, string) (storage.DoltStorage, error) {
 			if fixture.openErr != nil {
@@ -116,7 +132,12 @@ func registerCreatableFixture(t *testing.T, name string) *creatableFixture {
 			return s, nil
 		},
 		OpenReadOnly: func(context.Context, string) (storage.DoltStorage, error) {
-			return nil, errRegistryReadOnly
+			if fixture.openReadOnlyErr != nil {
+				return nil, fixture.openReadOnlyErr
+			}
+			s := &createFixtureStore{backend: fixture, config: map[string]string{}, metadata: map[string]string{}}
+			fixture.openedReadOnly = append(fixture.openedReadOnly, s)
+			return s, nil
 		},
 		Create: func(_ context.Context, beadsDir string) error {
 			fixture.created = append(fixture.created, beadsDir)
@@ -247,6 +268,139 @@ func TestInitProvisionsRegisteredBackendWithCreate(t *testing.T) {
 	}
 	if len(fixture.created) != 1 {
 		t.Fatalf("Create hook calls after the repeat inits = %d, want 1", len(fixture.created))
+	}
+}
+
+// TestInitRegisteredBackendInitIfMissingRefusesAMismatchedPrefix holds
+// --init-if-missing to the rule the Dolt route has: it skips an initialized
+// workspace, but not when the command line asks for a prefix the workspace
+// does not have, where skipping would report success for a prefix the caller
+// did not get. The prefix is the one the workspace's store holds, read
+// through a read-only open that is closed again. A --prefix that matches, or
+// only differs by what init normalizes away, is the skip; so is no --prefix at
+// all, although the default the route would derive (the directory name) is
+// not the workspace's either; and so is a prefix that cannot be read, since
+// the call many processes make at once must not fail on a store one of them
+// holds.
+func TestInitRegisteredBackendInitIfMissingRefusesAMismatchedPrefix(t *testing.T) {
+	const name = "registry-init-prefix"
+	fixture := registerCreatableFixture(t, name)
+	tmpDir := registeredInitWorkdir(t)
+	beadsDir := filepath.Join(tmpDir, ".beads")
+
+	if err := runRegisteredInit("--backend", name, "--prefix", "test", "--quiet"); err != nil {
+		t.Fatalf("bd init --backend=%s: %v", name, err)
+	}
+	before, err := os.ReadFile(configfile.ConfigPath(beadsDir))
+	if err != nil {
+		t.Fatalf("read metadata.json: %v", err)
+	}
+	untouched := func(t *testing.T) {
+		t.Helper()
+		if len(fixture.created) != 1 || len(fixture.opened) != 1 {
+			t.Fatalf("--init-if-missing on the initialized workspace created %d times and opened %d stores for writing, want 1 and 1", len(fixture.created), len(fixture.opened))
+		}
+		if got := fixture.persisted["issue_prefix"]; got != "test" {
+			t.Fatalf("the workspace's issue prefix = %q, want it left at %q", got, "test")
+		}
+		if after, err := os.ReadFile(configfile.ConfigPath(beadsDir)); err != nil || string(after) != string(before) {
+			t.Fatalf("metadata.json changed (err=%v):\n%s\nwant\n%s", err, after, before)
+		}
+		for i, s := range fixture.openedReadOnly {
+			if s.closed != 1 {
+				t.Fatalf("read-only store %d was closed %d times, want 1", i, s.closed)
+			}
+		}
+	}
+
+	err = runRegisteredInit("--backend", name, "--prefix", "other", "--quiet", "--init-if-missing")
+	if err == nil {
+		t.Fatal("bd init --init-if-missing --prefix other on a workspace with prefix test succeeded; want a refusal")
+	}
+	if errors.Is(err, errWorkspaceAlreadyInitialized) {
+		t.Fatalf("the refusal reads as the benign already-initialized skip: %v", err)
+	}
+	for _, want := range []string{`issue prefix "test"`, `--prefix "other"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %s: %v", want, err)
+		}
+	}
+	if len(fixture.openedReadOnly) != 1 {
+		t.Fatalf("the prefix was read through %d read-only opens, want 1", len(fixture.openedReadOnly))
+	}
+	untouched(t)
+
+	for _, same := range []string{"test", "test-"} {
+		if err := runRegisteredInit("--backend", name, "--prefix", same, "--quiet", "--init-if-missing"); err != nil {
+			t.Fatalf("bd init --init-if-missing --prefix %s on a workspace with prefix test: %v", same, err)
+		}
+	}
+	untouched(t)
+
+	// No --prefix: nothing was asked for, so nothing is compared and the
+	// store is not opened.
+	readOnlyOpens := len(fixture.openedReadOnly)
+	if err := runRegisteredInit("--backend", name, "--quiet", "--init-if-missing"); err != nil {
+		t.Fatalf("bd init --init-if-missing without --prefix: %v", err)
+	}
+	if len(fixture.openedReadOnly) != readOnlyOpens {
+		t.Fatalf("--init-if-missing without --prefix opened the store %d more times, want 0", len(fixture.openedReadOnly)-readOnlyOpens)
+	}
+	untouched(t)
+
+	// A prefix that cannot be read is not a mismatch.
+	errFault := errors.New("fixture fault")
+	fixture.openReadOnlyErr = errFault
+	if err := runRegisteredInit("--backend", name, "--prefix", "other", "--quiet", "--init-if-missing"); err != nil {
+		t.Fatalf("bd init --init-if-missing with the store refusing a read-only open: %v", err)
+	}
+	fixture.openReadOnlyErr = nil
+	fixture.getConfigErr = errFault
+	if err := runRegisteredInit("--backend", name, "--prefix", "other", "--quiet", "--init-if-missing"); err != nil {
+		t.Fatalf("bd init --init-if-missing with the prefix read failing: %v", err)
+	}
+	fixture.getConfigErr = nil
+	untouched(t)
+
+	// A plain init is refused as before, whatever prefix it names.
+	if err := runRegisteredInit("--backend", name, "--prefix", "other", "--quiet"); !errors.Is(err, errWorkspaceAlreadyInitialized) {
+		t.Fatalf("a plain bd init on the initialized workspace: err = %v, want the already-initialized refusal", err)
+	}
+	untouched(t)
+}
+
+// TestInitRegisteredBackendInitIfMissingComparesADoltWorkspaceByDatabase is
+// the same rule where the workspace found is a Dolt one: its prefix is
+// compared the way the Dolt route compares it, by the database name its
+// metadata records, and the registered backend's store is never opened.
+func TestInitRegisteredBackendInitIfMissingComparesADoltWorkspaceByDatabase(t *testing.T) {
+	const name = "registry-init-prefix-dolt"
+	fixture := registerCreatableFixture(t, name)
+	tmpDir := registeredInitWorkdir(t)
+	beadsDir := filepath.Join(tmpDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	cfg := configfile.DefaultConfig()
+	cfg.DoltDatabase = "my_app"
+	if err := cfg.Save(beadsDir); err != nil {
+		t.Fatalf("write the Dolt workspace's metadata.json: %v", err)
+	}
+
+	err := runRegisteredInit("--backend", name, "--prefix", "other", "--quiet", "--init-if-missing")
+	if err == nil {
+		t.Fatal("bd init --init-if-missing --prefix other on a workspace with database my_app succeeded; want a refusal")
+	}
+	for _, want := range []string{`database "my_app"`, `--prefix "other"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not name %s: %v", want, err)
+		}
+	}
+	if err := runRegisteredInit("--backend", name, "--prefix", "my-app", "--quiet", "--init-if-missing"); err != nil {
+		t.Fatalf("bd init --init-if-missing --prefix my-app on a workspace with database my_app: %v", err)
+	}
+	if len(fixture.created)+len(fixture.opened)+len(fixture.openedReadOnly) != 0 {
+		t.Fatalf("the Dolt workspace's answer touched the registered backend: created %q, %d write opens, %d read-only opens", fixture.created, len(fixture.opened), len(fixture.openedReadOnly))
 	}
 }
 
