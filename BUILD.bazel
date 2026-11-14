@@ -6,7 +6,7 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 # integration is listed so the `//go:build integration` test files (and
 # //internal/testutil/integration) are in srcs and deps; rules_go filters them
 # out of every build except --config=integration (.bazelrc), which sets the tag.
-# gazelle:build_tags gms_pure_go,integration
+# gazelle:build_tags gms_pure_go,integration,pebblegozstd
 # integrations/ holds no Go; it stays visible to Bazel (not in .bazelignore)
 # so //:repo_files covers it for //test/docsync's link checks and the
 # repository-policy tests in //scripts.
@@ -334,6 +334,7 @@ filegroup(
         "//backend/conformance:repo_doc_files",
         "//backend/http:repo_doc_files",
         "//backend/http/corpus:repo_doc_files",
+        "//backend/pebble:repo_doc_files",
         "//beadserrors:repo_doc_files",
         "//cmd/bd:repo_doc_files",
         "//cmd/bd/doctor:repo_doc_files",
@@ -575,6 +576,7 @@ filegroup(
         "//backend/conformance:repo_go_srcs",
         "//backend/http:repo_go_srcs",
         "//backend/http/corpus:repo_go_srcs",
+        "//backend/pebble:repo_go_srcs",
         "//beadserrors:repo_go_srcs",
         "//cmd/bd:repo_go_srcs",
         "//cmd/bd/doctor:repo_go_srcs",
@@ -801,6 +803,7 @@ filegroup(
         "//backend/conformance:repo_go_test_srcs",
         "//backend/http:repo_go_test_srcs",
         "//backend/http/corpus:repo_go_test_srcs",
+        "//backend/pebble:repo_go_test_srcs",
         "//beadserrors:repo_go_test_srcs",
         "//cmd/bd:repo_go_test_srcs",
         "//cmd/bd/doctor:repo_go_test_srcs",
@@ -1036,6 +1039,7 @@ filegroup(
         "//backend/conformance:repo_other_files",
         "//backend/http:repo_other_files",
         "//backend/http/corpus:repo_other_files",
+        "//backend/pebble:repo_other_files",
         "//beadserrors:repo_other_files",
         "//cmd/bd:repo_other_files",
         "//cmd/bd/doctor:repo_other_files",

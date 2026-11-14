@@ -164,6 +164,25 @@ bd dolt push
 - Ephemeral environments
 - Scripts that should not leave background processes
 
+### Experimental: Pebble Backend
+
+<Warning>
+Pebble is experimental. It has no history, no remotes, no sync and no federation, and the database is held by one process at a time. Dolt remains the default and the only supported backend.
+</Warning>
+
+Pebble is a pure-Go key-value engine. The `pebble` backend keeps the same beads: issues, dependencies, ready work, labels, comments, events, claims and leases all behave as on Dolt, and `bd ready`, `bd list` and `bd stats` are served from indexes so they stay fast as the workspace grows. What you give up is everything Dolt's version control provides: `bd history`, `--as-of`, `bd dolt push` and `pull`, and federation are refused on a Pebble workspace.
+
+Released `bd` binaries do not include it. Build `bd` from source with the `pebblegozstd` tag, then choose the backend at init; the choice is recorded in `.beads/metadata.json` and the data lives at `.beads/pebble/`:
+
+```bash
+make build BUILD_TAGS=gms_pure_go,pebblegozstd
+./bd init --backend=pebble --prefix myproj
+./bd create "First bead"
+./bd ready
+```
+
+Because one process holds the database at a time, the backend suits a single agent or a single long-running process; a second `bd` command that runs while another holds the workspace fails to open it instead of waiting.
+
 ### Multi-Clone Scenarios
 
 <Warning>
@@ -186,6 +205,7 @@ See [Sync Failures Recovery](/recovery/sync-failures) for sync race condition tr
 ```text
 .beads/
 ├── embeddeddolt/     # Dolt database (embedded mode, default) — gitignored
+├── pebble/           # Pebble database (experimental `pebble` backend) — ignores itself
 ├── dolt/             # Dolt database (server mode) — gitignored
 ├── dolt-server.pid   # Server-mode runtime files (.pid, .log, .port) — gitignored
 ├── issues.jsonl      # Passive JSONL export for viewers and interchange
