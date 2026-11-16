@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/beads/internal/configfile"
 	"github.com/steveyegge/beads/internal/storage"
 	"github.com/steveyegge/beads/internal/storage/backends"
+	"github.com/steveyegge/beads/internal/workspacegate"
 )
 
 // TestInitRejectsRegisteredBackend verifies bd init fails closed for a
@@ -109,6 +111,9 @@ type creatableFixture struct {
 	opened         []*createFixtureStore
 	openedReadOnly []*createFixtureStore
 	persisted      map[string]string
+	// onCreate, when set, runs inside the Create hook, where a test can look
+	// at what bd init holds while it creates.
+	onCreate func(beadsDir string)
 
 	createErr       error
 	openErr         error
@@ -141,6 +146,9 @@ func registerCreatableFixture(t *testing.T, name string) *creatableFixture {
 		},
 		Create: func(_ context.Context, beadsDir string) error {
 			fixture.created = append(fixture.created, beadsDir)
+			if fixture.onCreate != nil {
+				fixture.onCreate(beadsDir)
+			}
 			if fixture.createErr != nil {
 				return fixture.createErr
 			}
@@ -508,13 +516,12 @@ func TestInitRegisteredBackendFailureKeepsAPreexistingBeadsDir(t *testing.T) {
 // non-zero for a registered backend before it could be provisioned, and an
 // init that accepted one and ignored it would report success for a workspace
 // the caller did not ask for. The refusal names the flag and the backend and
-// comes before anything is created.
+// comes before anything is created. Every case has its own backend and
+// directory, so one that leaks reports itself and nothing after it.
 func TestInitRegisteredBackendRefusesFlagsItCannotHonor(t *testing.T) {
-	const name = "registry-init-flags"
-	fixture := registerCreatableFixture(t, name)
-	tmpDir := registeredInitWorkdir(t)
-	beadsDir := filepath.Join(tmpDir, ".beads")
-
+	// A database path no case's directory holds: --db is refused before it
+	// is looked at.
+	elsewhere := filepath.Join(t.TempDir(), "elsewhere.db")
 	cases := [][]string{
 		{"--server"},
 		{"--remote", "https://example.invalid/x"},
@@ -524,12 +531,17 @@ func TestInitRegisteredBackendRefusesFlagsItCannotHonor(t *testing.T) {
 		{"--force"},
 		{"--proxied-server"},
 		{"--database", "elsewhere"},
-		{"--db", filepath.Join(tmpDir, "elsewhere.db")},
+		{"--db", elsewhere},
 		{"--" + removedBackendInitFlags[0].name, "x"},
 		{"--server", "--remote", "https://example.invalid/x", "--stealth"},
 	}
-	for _, extra := range cases {
+	for i, extra := range cases {
 		t.Run(strings.Join(extra, " "), func(t *testing.T) {
+			name := "registry-init-flags-" + string(rune('a'+i))
+			fixture := registerCreatableFixture(t, name)
+			tmpDir := registeredInitWorkdir(t)
+			beadsDir := filepath.Join(tmpDir, ".beads")
+
 			args := append([]string{"--backend", name, "--prefix", "test", "--quiet"}, extra...)
 			err := runRegisteredInit(args...)
 			if err == nil {
@@ -551,4 +563,239 @@ func TestInitRegisteredBackendRefusesFlagsItCannotHonor(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestInitRegisteredBackendRefusesADatabaseNamedInTheEnvironment is the same
+// rule for the environment twins of --db. BEADS_DB is --db by another name to
+// bd init, and the root command resolves the workspace from BEADS_DB or BD_DB
+// before init runs, so an init that accepted one would create its workspace
+// beside a database path the route never uses, not in the directory it was
+// run in. The refusal names the variable, its value and the backend, comes
+// before anything is created in either place, and covers --init-if-missing;
+// with the variable gone the init lands in the working directory.
+func TestInitRegisteredBackendRefusesADatabaseNamedInTheEnvironment(t *testing.T) {
+	for i, key := range []string{"BEADS_DB", "BD_DB"} {
+		t.Run(key, func(t *testing.T) {
+			name := "registry-init-env-" + string(rune('a'+i))
+			fixture := registerCreatableFixture(t, name)
+			tmpDir := registeredInitWorkdir(t)
+			beadsDir := filepath.Join(tmpDir, ".beads")
+			t.Setenv("BEADS_DB", "")
+			t.Setenv("BD_DB", "")
+
+			elsewhere, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatalf("resolve the temp dir: %v", err)
+			}
+			named := filepath.Join(elsewhere, "project", ".beads", "beads.db")
+			t.Setenv(key, named)
+
+			for _, extra := range [][]string{nil, {"--init-if-missing"}} {
+				args := append([]string{"--backend", name, "--prefix", "test", "--quiet"}, extra...)
+				err := runRegisteredInit(args...)
+				if err == nil {
+					t.Fatalf("%s=%s bd init %s succeeded; want a refusal", key, named, strings.Join(args, " "))
+				}
+				for _, want := range []string{key, named, name} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("the refusal does not name %s: %v", want, err)
+					}
+				}
+				if len(fixture.created) != 0 {
+					t.Fatalf("the refused init reached the Create hook: %q", fixture.created)
+				}
+				if initPathExists(t, beadsDir) {
+					t.Fatalf("the refused init created %s", beadsDir)
+				}
+				if initPathExists(t, filepath.Join(elsewhere, "project")) {
+					t.Fatalf("the refused init created %s", filepath.Join(elsewhere, "project"))
+				}
+				// The root command may have bound the directory the variable
+				// names for its own use; the next run starts without it.
+				t.Setenv("BEADS_DIR", "")
+			}
+
+			t.Setenv(key, "")
+			if err := runRegisteredInit("--backend", name, "--prefix", "test", "--quiet"); err != nil {
+				t.Fatalf("bd init without %s: %v", key, err)
+			}
+			if len(fixture.created) != 1 || fixture.created[0] != beadsDir {
+				t.Fatalf("Create hook calls = %q, want exactly [%q]", fixture.created, beadsDir)
+			}
+		})
+	}
+}
+
+// TestInitRegisteredBackendHoldsTheWorkspaceGate pins the route's use of
+// init's workspace gate, which every other test here would pass without. bd
+// init creates workspace state, so it holds the gate exclusively while it
+// does: nothing else gets in during Create, and an init does not start over
+// a command that is running. An initialized workspace is answered before the
+// gate, so --init-if-missing on one neither waits for nor fails on whatever
+// holds it. And the answer is asked again under the gate, so an init that
+// waited for another one finds the workspace that one made instead of
+// creating over it.
+func TestInitRegisteredBackendHoldsTheWorkspaceGate(t *testing.T) {
+	resetGateTestEnv(t)
+	ctx := context.Background()
+	workspace := func(t *testing.T, name string) (*creatableFixture, string, workspacegate.Gate) {
+		t.Helper()
+		fixture := registerCreatableFixture(t, name)
+		beadsDir := filepath.Join(registeredInitWorkdir(t), ".beads")
+		gate, err := workspacegate.ForWorkspace(beadsDir)
+		if err != nil {
+			t.Fatalf("the workspace gate for %s: %v", beadsDir, err)
+		}
+		return fixture, beadsDir, gate
+	}
+
+	t.Run("create runs under the exclusive gate", func(t *testing.T) {
+		const name = "registry-init-gate-held"
+		fixture, _, gate := workspace(t, name)
+
+		// What an ordinary command would get if it started during Create.
+		probed := false
+		var duringCreate error
+		fixture.onCreate = func(string) {
+			probed = true
+			h, err := gate.Acquire(ctx, workspacegate.Shared, workspacegate.Options{})
+			if err == nil {
+				_ = h.Release()
+			}
+			duringCreate = err
+		}
+		if err := runRegisteredInit("--backend", name, "--prefix", "test", "--quiet"); err != nil {
+			t.Fatalf("bd init --backend=%s: %v", name, err)
+		}
+		if !probed {
+			t.Fatal("the Create hook never ran")
+		}
+		if !errors.Is(duringCreate, workspacegate.ErrBusy) {
+			t.Fatalf("a shared acquisition during Create: err = %v, want %v: bd init was not holding the workspace gate exclusively", duringCreate, workspacegate.ErrBusy)
+		}
+		h, err := gate.Acquire(ctx, workspacegate.Exclusive, workspacegate.Options{})
+		if err != nil {
+			t.Fatalf("bd init returned still holding the workspace gate: %v", err)
+		}
+		_ = h.Release()
+	})
+
+	t.Run("init does not start over a running command", func(t *testing.T) {
+		const name = "registry-init-gate-busy"
+		fixture, beadsDir, gate := workspace(t, name)
+		t.Setenv(initGateTimeoutEnv, "300ms")
+
+		running, err := gate.Acquire(ctx, workspacegate.Shared, workspacegate.Options{Reason: "test command"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = running.Release() })
+
+		err = runRegisteredInit("--backend", name, "--prefix", "test", "--quiet")
+		if !errors.Is(err, workspacegate.ErrBusy) || !strings.Contains(err.Error(), "bd init refuses to run over live bd activity") {
+			t.Fatalf("bd init with a command holding the workspace gate: err = %v, want the live-activity refusal", err)
+		}
+		if len(fixture.created) != 0 {
+			t.Fatalf("the refused init reached the Create hook: %q", fixture.created)
+		}
+		if initPathExists(t, beadsDir) {
+			t.Fatalf("the refused init created %s", beadsDir)
+		}
+
+		if err := running.Release(); err != nil {
+			t.Fatal(err)
+		}
+		if err := runRegisteredInit("--backend", name, "--prefix", "test", "--quiet"); err != nil {
+			t.Fatalf("bd init once the command finished: %v", err)
+		}
+	})
+
+	t.Run("an initialized workspace is answered without the gate", func(t *testing.T) {
+		const name = "registry-init-gate-skip"
+		fixture, _, gate := workspace(t, name)
+		if err := runRegisteredInit("--backend", name, "--prefix", "test", "--quiet"); err != nil {
+			t.Fatalf("bd init --backend=%s: %v", name, err)
+		}
+		t.Setenv(initGateTimeoutEnv, "300ms")
+
+		// Exclusive, the hold nothing that takes the gate gets past.
+		maintenance, err := gate.Acquire(ctx, workspacegate.Exclusive, workspacegate.Options{Reason: "test maintenance"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = maintenance.Release() })
+
+		if err := runRegisteredInit("--backend", name, "--quiet", "--init-if-missing"); err != nil {
+			t.Fatalf("bd init --init-if-missing on the initialized workspace, its gate held: %v", err)
+		}
+		if err := runRegisteredInit("--backend", name, "--prefix", "test", "--quiet", "--init-if-missing"); err != nil {
+			t.Fatalf("bd init --init-if-missing --prefix test on the initialized workspace, its gate held: %v", err)
+		}
+		if err := runRegisteredInit("--backend", name, "--prefix", "test", "--quiet"); !errors.Is(err, errWorkspaceAlreadyInitialized) {
+			t.Fatalf("a plain bd init on the initialized workspace, its gate held: err = %v, want the already-initialized refusal", err)
+		}
+		if len(fixture.created) != 1 {
+			t.Fatalf("Create hook calls = %d, want 1", len(fixture.created))
+		}
+	})
+
+	t.Run("an init that waited finds the workspace the other one made", func(t *testing.T) {
+		const name = "registry-init-gate-waited"
+		fixture, beadsDir, gate := workspace(t, name)
+		t.Setenv(initGateTimeoutEnv, "60s")
+
+		// Another bd init is in the middle of making this workspace.
+		other, err := gate.Acquire(ctx, workspacegate.Exclusive, workspacegate.Options{Reason: "test bd init"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Closed when the waiting init returns; waited is its error.
+		done := make(chan struct{})
+		var waited error
+		go func() {
+			defer close(done)
+			waited = runRegisteredInit("--backend", name, "--prefix", "test", "--quiet", "--init-if-missing")
+		}()
+		t.Cleanup(func() {
+			_ = other.Release()
+			select {
+			case <-done:
+			case <-time.After(60 * time.Second):
+			}
+		})
+
+		// This init found no workspace and is waiting for the gate.
+		deadline := time.Now().Add(30 * time.Second)
+		for !gate.ExclusiveQueued() && time.Now().Before(deadline) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if !gate.ExclusiveQueued() {
+			t.Fatal("bd init never queued for the workspace gate")
+		}
+
+		// The other init commits and lets go.
+		if err := os.MkdirAll(beadsDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		cfg := configfile.DefaultConfig()
+		cfg.Backend = name
+		if err := cfg.Save(beadsDir); err != nil {
+			t.Fatalf("write the other init's metadata.json: %v", err)
+		}
+		if err := other.Release(); err != nil {
+			t.Fatal(err)
+		}
+
+		select {
+		case <-done:
+		case <-time.After(60 * time.Second):
+			t.Fatal("bd init did not return after the gate was released")
+		}
+		if waited != nil {
+			t.Fatalf("bd init --init-if-missing after waiting for the other init: %v", waited)
+		}
+		if len(fixture.created)+len(fixture.opened) != 0 {
+			t.Fatalf("the init that waited created over the other one's workspace: created %q, %d write opens", fixture.created, len(fixture.opened))
+		}
+	})
 }
