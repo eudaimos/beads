@@ -76,6 +76,11 @@ func TestLifecycleUpdateContract(t *testing.T) {
 		{"ProvenanceLabelsHistory", conformance.RunLifecycleUpdateProvenanceLabelsHistory},
 		{"RefusesATemplate", conformance.RunLifecycleUpdateRefusesATemplate},
 		{"AllowTemplateEditsATemplate", conformance.RunLifecycleUpdateAllowTemplateEditsATemplate},
+		{"ClaimRefusesALiveBlocker", conformance.RunLifecycleUpdateClaimRefusesALiveBlocker},
+		{"ForceClaimBlockedClaimsPastALiveBlocker", conformance.RunLifecycleUpdateForceClaimBlockedClaimsPastALiveBlocker},
+		{"ReclaimByTheHolderIgnoresANewBlocker", conformance.RunLifecycleUpdateReclaimByTheHolderIgnoresANewBlocker},
+		{"ClaimIgnoresAnInheritedBlockedFlag", conformance.RunLifecycleUpdateClaimIgnoresAnInheritedBlockedFlag},
+		{"ForceClaimBlockedRequiresAClaim", conformance.RunLifecycleUpdateForceClaimBlockedRequiresAClaim},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1066,6 +1071,7 @@ func TestMoleculeContract(t *testing.T) {
 		{"StepperNeverTakesAStepAnotherActorHolds", conformance.RunMoleculeStepperNeverTakesAStepAnotherActorHolds},
 		{"StepperAnswersCompleteAndOutsideAMolecule", conformance.RunMoleculeStepperAnswersCompleteAndOutsideAMolecule},
 		{"StepperClaimsAWispStep", conformance.RunMoleculeStepperClaimsAWispStep},
+		{"StepperClaimsAStepBlockedFromOutsideTheMolecule", conformance.RunMoleculeStepperClaimsAStepBlockedFromOutsideTheMolecule},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -232,6 +232,17 @@ func (t *txn) lifecycleUpdate(attempt publicops.UpdateRequest, guardTemplate boo
 		}
 		if before.Status != types.StatusInProgress || !storageissueops.ActorMatches(before.Assignee, attempt.Actor) {
 			changed = true
+			// A claim that took the row is refused while the row has a live
+			// local blocker, unless the request waives it
+			// (issueops.EnforceClaimPolicyInTx). The check runs only after
+			// a win, so a lost claim still reports its conflict and the
+			// holder's re-claim still succeeds; the refusal fails the
+			// transaction, which drops the claim with it.
+			if !attempt.ForceClaimBlocked {
+				if err := claimPolicy(t.kv, attempt.IssueID); err != nil {
+					return false, err
+				}
+			}
 		}
 	}
 	current := before
@@ -530,6 +541,28 @@ func enforceClosePolicy(r kv, id string, force, closed bool) (int, error) {
 		}
 	}
 	return openChildren, nil
+}
+
+// claimPolicy refuses a claim of id while it has a live local blocker, by the
+// close policy's predicate: the stored flag, then the direct scheduling edges
+// whose target is still open. A stale flag with no live edge, or a block
+// inherited only through a parent, does not refuse.
+func claimPolicy(r kv, id string) error {
+	rec, err := getRecord(r, id)
+	if err != nil {
+		return fmt.Errorf("check claim blockers for %s: %w", id, err)
+	}
+	if !rec.Issue.IsBlocked {
+		return nil
+	}
+	blockers, err := liveBlockers(r, id)
+	if err != nil {
+		return fmt.Errorf("check claim blockers for %s: %w", id, err)
+	}
+	if len(blockers) > 0 {
+		return &publicops.BlockedError{IssueID: id, Blockers: blockers, Err: storage.ErrClaimBlocked}
+	}
+	return nil
 }
 
 // liveBlockers lists the scheduling edges of id whose target is still open.
