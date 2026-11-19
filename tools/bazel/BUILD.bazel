@@ -179,6 +179,7 @@ release_cross_build(
         "//:beads",
         "//backend/conformance:conformance",
         "//backend/http:http",
+        "//backend/pebble:pebble",
         "//backend:backend",
         "//beadserrors:beadserrors",
         "//cmd/bd/doctor/fix:fix",
