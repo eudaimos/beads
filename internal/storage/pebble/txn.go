@@ -14,6 +14,12 @@ type txn struct {
 	// transaction began (journal.go).
 	journal bool
 
+	// journalActor is the actor of the last journal record this transaction
+	// wrote that named one: the request whose writes the transaction holds.
+	// settleBlocked names it on the derived is_blocked updates the request
+	// causes, as the SQL seam's recompute does (gastownhall/beads#8432).
+	journalActor string
+
 	// dirtyBlocked collects the ids whose neighborhood a write in this
 	// transaction may have changed; recomputeBlocked settles them.
 	dirtyBlocked map[string]bool

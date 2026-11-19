@@ -74,6 +74,9 @@ func TestJournalContract(t *testing.T) {
 	t.Run("EveryMutationKindRecordsItsActor", func(t *testing.T) {
 		conformance.RunJournalEveryMutationKindRecordsItsActor(t, ctx, fixture)
 	})
+	t.Run("DerivedRecordsCarryTheCausingActor", func(t *testing.T) {
+		conformance.RunJournalDerivedRecordsCarryTheCausingActor(t, ctx, fixture)
+	})
 }
 
 func newJournalFixture(t *testing.T, prefix string) (conformance.JournalFixture, context.Context) {
@@ -116,23 +119,21 @@ func newJournalFixture(t *testing.T, prefix string) (conformance.JournalFixture,
 	// upsert, so the import cases drive that door.
 	arrival.Import = conformance.ArrivalUpsertImportHook(store)
 	arrival.Rename = conformance.ArrivalRenameHook(store)
-	fixture := conformance.JournalFixture{
-		IssuePrefix:       prefix,
-		Journal:           cursor,
-		SetJournalEnabled: store.SetEventsJournalEnabled,
-		Prune:             store.PruneEventsJournal,
-		Arrival:           arrival,
-		Mutations: conformance.JournalMutations{
+	// The hooks act as the actor they are built for, so the derived-record
+	// case can seed as one identity and mutate as another.
+	var mutationsAs func(actor string) conformance.JournalMutations
+	mutationsAs = func(actor string) conformance.JournalMutations {
+		return conformance.JournalMutations{
 			Create: func(ctx context.Context, id string) error {
 				return store.CreateIssue(ctx, &types.Issue{
 					ID: id, Title: "t-" + id, IssueType: types.TypeTask, Status: types.StatusOpen,
-				}, "actor")
+				}, actor)
 			},
 			Update: func(ctx context.Context, id string) error {
-				return store.UpdateIssue(ctx, id, map[string]any{"title": "renamed " + id}, "actor")
+				return store.UpdateIssue(ctx, id, map[string]any{"title": "renamed " + id}, actor)
 			},
 			Close: func(ctx context.Context, id string) error {
-				return store.CloseIssue(ctx, id, "done", "actor", "")
+				return store.CloseIssue(ctx, id, "done", actor, "")
 			},
 			Delete: func(ctx context.Context, id string) error {
 				return store.DeleteIssue(ctx, id)
@@ -140,18 +141,27 @@ func newJournalFixture(t *testing.T, prefix string) (conformance.JournalFixture,
 			AddDependency: func(ctx context.Context, from, to string) error {
 				return store.AddDependency(ctx, &types.Dependency{
 					IssueID: from, DependsOnID: to, Type: types.DepBlocks,
-				}, "actor")
+				}, actor)
 			},
 			RemoveDependency: func(ctx context.Context, from, to string) error {
-				return store.RemoveDependency(ctx, from, to, "actor")
+				return store.RemoveDependency(ctx, from, to, actor)
 			},
 			Comment: func(ctx context.Context, id, text string) error {
-				return store.AddComment(ctx, id, "actor", text)
+				return store.AddComment(ctx, id, actor, text)
 			},
 			// DeleteIssue takes no actor, so its record names nobody.
-			Actor:           "actor",
+			Actor:           actor,
 			ActorlessDelete: true,
-		},
+			As:              mutationsAs,
+		}
+	}
+	fixture := conformance.JournalFixture{
+		IssuePrefix:       prefix,
+		Journal:           cursor,
+		SetJournalEnabled: store.SetEventsJournalEnabled,
+		Prune:             store.PruneEventsJournal,
+		Arrival:           arrival,
+		Mutations:         mutationsAs("actor"),
 	}
 	return fixture, ctx
 }
