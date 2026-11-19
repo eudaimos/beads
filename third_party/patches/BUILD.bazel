@@ -12,6 +12,11 @@
 # builds as a declared dep even though no pure-Go file imports it. Their init
 # panics, so a pure binary that does link gozstd fails when started.
 #
+# pebble_pure_go_zstd.patch is beads' own: it removes the build constraint from
+# Pebble's pure-Go zstd file so that path compiles in every configuration,
+# with no build tag for a lane to carry (MODULE.bazel says why the cgo path
+# cannot be linked beside Dolt). Regenerate it when bumping Pebble in go.mod.
+#
 # rules_go_nogo_golangci_nolint.patch and x_tools_ctrlflow_stdlib_noreturn.patch
 # are gascity's (third_party/patches there), byte-identical: nogo (//tools/nogo)
 # honors //nolint with golangci-lint's ranges, and ctrlflow knows the standard

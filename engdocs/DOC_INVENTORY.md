@@ -78,6 +78,7 @@ Follow-up automation should replace marker-only checks with generated or
 | `design/bdp.md` | Keep | BDP bring-up: what changes for engineers, the vendored copy and pin in `third_party/bdp/`, and the pin-bump rules (#8319). States only what main has, and each BDP slice updates it. Defers to `openapi.v0.yaml` and `design/bd-serve-v0.md` for v0 and to gastownhall/bdp for the spec. |
 | `design/dolt-concurrency.md` | Keep | Design note for Dolt concurrency. |
 | `design/kv-store.md` | Keep | Draft design note; retain as design seam, not user reference. |
+| `design/pebble-backend.md` | Keep | Design note for the experimental Pebble key-value backend: why, the three layers it landed in, how it is proven, what it does not do. |
 | `design/otel/otel-architecture.md` | Keep | Architecture/design doc for telemetry; reference tables should defer to data model. |
 | `design/otel/otel-data-model.md` | Keep with freshness | Reference schema; reviewed against telemetry and emission code. |
 | `DOC_INVENTORY.md` | Keep | This disposition and seam inventory. |

@@ -1,0 +1,139 @@
+package pebble
+
+import (
+	"errors"
+	"io"
+
+	"github.com/cockroachdb/pebble/v2"
+)
+
+// kv is the read/write surface every operation in this package is written
+// against: the DB itself outside a transaction, and an indexed batch inside
+// one, so the same code reads its own uncommitted writes in a transaction.
+type kv interface {
+	get(key []byte) ([]byte, bool, error)
+	set(key, value []byte) error
+	del(key []byte) error
+	// scan calls fn for every key with the given prefix, in key order, until
+	// fn returns false or an error. The key and value slices are only valid
+	// for the duration of the call.
+	scan(prefix []byte, fn func(key, value []byte) (bool, error)) error
+	// iter returns a positioned-by-the-caller iterator over [lo, hi); a nil
+	// hi means no upper bound. The caller closes it.
+	iter(lo, hi []byte) (*pebble.Iterator, error)
+}
+
+// dbKV reads and writes the database directly (autocommit, synced).
+type dbKV struct{ db *pebble.DB }
+
+func (d dbKV) get(key []byte) ([]byte, bool, error) {
+	return pebbleGet(d.db.Get(key))
+}
+
+func (d dbKV) set(key, value []byte) error { return d.db.Set(key, value, pebble.Sync) }
+func (d dbKV) del(key []byte) error        { return d.db.Delete(key, pebble.Sync) }
+
+func (d dbKV) scan(prefix []byte, fn func(key, value []byte) (bool, error)) error {
+	it, err := d.db.NewIter(prefixBounds(prefix))
+	if err != nil {
+		return err
+	}
+	return scanIter(it, fn)
+}
+
+func (d dbKV) iter(lo, hi []byte) (*pebble.Iterator, error) {
+	return d.db.NewIter(&pebble.IterOptions{LowerBound: lo, UpperBound: hi})
+}
+
+// batchKV reads and writes an indexed batch: a transaction's working set.
+type batchKV struct{ b *pebble.Batch }
+
+func (b batchKV) get(key []byte) ([]byte, bool, error) {
+	return pebbleGet(b.b.Get(key))
+}
+
+func (b batchKV) set(key, value []byte) error { return b.b.Set(key, value, nil) }
+func (b batchKV) del(key []byte) error        { return b.b.Delete(key, nil) }
+
+func (b batchKV) scan(prefix []byte, fn func(key, value []byte) (bool, error)) error {
+	it, err := b.b.NewIter(prefixBounds(prefix))
+	if err != nil {
+		return err
+	}
+	return scanIter(it, fn)
+}
+
+func (b batchKV) iter(lo, hi []byte) (*pebble.Iterator, error) {
+	return b.b.NewIter(&pebble.IterOptions{LowerBound: lo, UpperBound: hi})
+}
+
+// scanRange calls fn for every key in [lo, hi), in key order, until fn
+// returns false or an error.
+func scanRange(r kv, lo, hi []byte, fn func(key, value []byte) (bool, error)) error {
+	it, err := r.iter(lo, hi)
+	if err != nil {
+		return err
+	}
+	return scanIter(it, fn)
+}
+
+// snapKV reads one consistent snapshot of the database; writes are refused.
+type snapKV struct{ snap *pebble.Snapshot }
+
+func (s snapKV) get(key []byte) ([]byte, bool, error) {
+	return pebbleGet(s.snap.Get(key))
+}
+
+func (s snapKV) set([]byte, []byte) error { return errors.New("pebble: write through a read snapshot") }
+func (s snapKV) del([]byte) error         { return errors.New("pebble: delete through a read snapshot") }
+
+func (s snapKV) scan(prefix []byte, fn func(key, value []byte) (bool, error)) error {
+	it, err := s.snap.NewIter(prefixBounds(prefix))
+	if err != nil {
+		return err
+	}
+	return scanIter(it, fn)
+}
+
+func (s snapKV) iter(lo, hi []byte) (*pebble.Iterator, error) {
+	return s.snap.NewIter(&pebble.IterOptions{LowerBound: lo, UpperBound: hi})
+}
+
+// pebbleGet adapts Pebble's (value, closer, err) triple: the value is copied
+// out before the closer releases it, and ErrNotFound becomes (nil, false).
+func pebbleGet(value []byte, closer io.Closer, err error) ([]byte, bool, error) {
+	if err != nil {
+		if errors.Is(err, pebble.ErrNotFound) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	out := make([]byte, len(value))
+	copy(out, value)
+	_ = closer.Close()
+	return out, true, nil
+}
+
+func scanIter(it *pebble.Iterator, fn func(key, value []byte) (bool, error)) (err error) {
+	defer func() {
+		if cerr := it.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+	for ok := it.First(); ok; ok = it.Next() {
+		more, err := fn(it.Key(), it.Value())
+		if err != nil {
+			return err
+		}
+		if !more {
+			break
+		}
+	}
+	return it.Error()
+}
+
+// prefixBounds returns the iterator bounds covering every key that starts
+// with prefix: [prefix, prefix+1) in byte order.
+func prefixBounds(prefix []byte) *pebble.IterOptions {
+	return &pebble.IterOptions{LowerBound: prefix, UpperBound: prefixEnd(prefix)}
+}
