@@ -225,6 +225,9 @@ func journalSnapshot(r kv, rec *issueRecord) (*types.Issue, error) {
 }
 
 func (t *txn) writeJournalRow(seq int64, op storageissueops.EventOp, id, actor string, issue *types.Issue, dep *storageissueops.EventDep, comment *storageissueops.EventComment) error {
+	if actor != "" {
+		t.journalActor = actor
+	}
 	row := journalRow{Seq: seq, TS: nowUTC(), Op: string(op), IssueID: id, Actor: actor}
 	if issue != nil {
 		b, err := json.Marshal(issue)

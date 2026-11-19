@@ -377,8 +377,6 @@ func (t *txn) rewriteDeletedReferences(deletedIDs []string, neighbors []*issueRe
 	}
 	touched := map[string]bool{}
 	for _, id := range deletedIDs {
-		re := storageissueops.DeletedReferencePattern(id)
-		replacement := `$1[deleted:` + id + `]$3`
 		for _, neighbor := range neighbors {
 			updates := map[string]interface{}{}
 			for _, field := range []struct {
@@ -390,10 +388,13 @@ func (t *txn) rewriteDeletedReferences(deletedIDs []string, neighbors []*issueRe
 				{"design", &neighbor.Issue.Design},
 				{"acceptance_criteria", &neighbor.Issue.AcceptanceCriteria},
 			} {
-				if *field.value == "" || !re.MatchString(*field.value) {
+				if *field.value == "" {
 					continue
 				}
-				rewritten := re.ReplaceAllString(*field.value, replacement)
+				rewritten, changed := types.RewriteDeletedReferences(*field.value, id)
+				if !changed {
+					continue
+				}
 				updates[field.column] = rewritten
 				*field.value = rewritten
 			}

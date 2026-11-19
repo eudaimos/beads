@@ -344,6 +344,7 @@ func TestDeleterContract(t *testing.T) {
 		{"ErasesAcrossBothPlanes", conformance.RunDeleterErasesAcrossBothPlanes},
 		{"CollapsesDuplicateIDs", conformance.RunDeleterCollapsesDuplicateIDs},
 		{"RewritesReferencesInNeighbors", conformance.RunDeleterRewritesReferencesInNeighbors},
+		{"RewritesOnlyTheDeletedIDInAHierarchy", conformance.RunDeleterRewritesOnlyTheDeletedIDInAHierarchy},
 		{"DryRunChangesNothing", conformance.RunDeleterDryRunChangesNothing},
 		{"RecordsExactlyOneHistoryEntry", conformance.RunDeleterRecordsExactlyOneHistoryEntry},
 		{"DoesNotMutateTheCallerRequest", conformance.RunDeleterDoesNotMutateTheCallerRequest},

@@ -272,9 +272,10 @@ func (t *txn) settleBlocked() error {
 			if want != old.Issue.IsBlocked {
 				// A flipped stored flag is journaled as an update carrying the
 				// settled snapshot, so a replay needs no graph walk of its own
-				// (issueops.recordBlockedJournalChanges); derived maintenance
-				// has no actor.
-				if err := t.journalIssue(storageissueops.EventUpdate, id, ""); err != nil {
+				// (issueops.recordBlockedJournalChanges). It names the actor
+				// of the request that caused the flip: a record naming no
+				// one reads as system/unknown to a consumer.
+				if err := t.journalIssue(storageissueops.EventUpdate, id, t.journalActor); err != nil {
 					return err
 				}
 			}
