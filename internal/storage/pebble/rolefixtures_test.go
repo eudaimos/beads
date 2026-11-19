@@ -423,6 +423,9 @@ func newLifecycleUpdateFixture(t *testing.T, prefix string) (conformance.Lifecyc
 		},
 		ListDependencies: dependencyLister(kit.store),
 		WispExists:       wispProbe(kit.store),
+		// GetIssue hides the stored flag, so it is read the way the other
+		// legs read it, through the kit's query stand-in.
+		StoredIsBlocked: conformance.StoredIsBlockedThrough(kit.QueryScalar),
 	}, ctx
 }
 

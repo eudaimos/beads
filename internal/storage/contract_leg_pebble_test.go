@@ -10,13 +10,16 @@ package storage
 // BatchCreator, and the journal and arrival contracts), and skips the
 // contracts of the roles it does not serve yet, whose accessors answer
 // *storage.ErrUnsupported through its generated shell. The ceiling is that
-// count, and it falls with each role the leg takes on.
+// count, and it falls with each role the leg takes on. It rose once, from 141
+// to 143, when main gained two id-retention cases (a plain sweep keeps the
+// child suffix reserved, and a plain-swept child id stays reusable): the leg
+// wires none of the id-retention contract until it has id tombstones.
 func init() {
 	registerContractLeg(contractLeg{
 		name:       "pebble",
 		wiringRoot: "internal/storage/pebble",
 		adopting: "the Phase 0 spike wires the contracts of the roles it serves and skips those of the " +
 			"roles its generated unsupported shell still answers; the ceiling falls as roles land",
-		adoptionCeiling: 141,
+		adoptionCeiling: 143,
 	})
 }
